@@ -1,0 +1,46 @@
+**Fundamentals** -- https://github.com/frediramos/SummBoundVerify
+
+1. summbv builds a testing harness (called <function-name>-validation.c)
+example for summbv call:
+summbv \
+    --arraysize 3 \ 
+    -func concrete.c \
+    --summname strlen \
+    --lib strlen.c \
+    --compile x86
+
+Additional flags:
+--memory -> consider targeted memory
+--maxvalue -> "bounds the maximum value for symbolic scalar inputs"
+--compile -> compiles to binary for symbolic execution tools
+--lib -> for additional library functions which are used but not tested
+-config -> consider a config file in .txt format (makes easier)
+
+All config-file options:
+func  concrete.c          // -func            (Path to file containing the concrete function)
+summ  summ.c              // -summ            (Path to file containing the target summary)
+summname  strlen          // --summname       (Name of the summary in the given path)
+funcname  summ_strlen     // --funcname       (Name of the concrete function in the given path)
+arraysize 5 | [5,7]       // --arraysize      (Maximum array size of each test (default:5))
+nullbytes 3 | [2,3]       // --nullbytes      (Specify array indexes to place null bytes)
+defaultvalues {1:'NULL'}  // --defaultvalues  (Specify default const values for input variables)
+maxvalue 5                // --maxvalue       (Provide an upper bound for numeric values)
+maxnames len              // --maxnames       (Numeric value names to be constrained)
+concretearray {1:[0]}     // --concretearray  (Place concrete values in selected array indexes)
+lib lib.c                 // --lib            (Path to external files required for compilation)
+compile x86               // --compile        (Compile the generated test)
+
+2. executing the harness with "make run"
+3. the result is outputed inside the console + a json-file
+
+example:
+{
+  "strlen_validation.test_1": {
+    "result": "Exact",
+    "counterexamples": {}
+  }
+}
+
+ideas:
+1. json files as output for analysis and pipeline use -> counterexamples used for parameter tweaking
+2. pydantic AI, Lang Graph

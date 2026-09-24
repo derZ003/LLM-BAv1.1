@@ -1,0 +1,26 @@
+# Project
+.dockerignore
+Dockerfile
+README.md
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Packaging
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Git
+.git/
+.gitignore
+
+# IDEs
+.vscode/
+.idea/

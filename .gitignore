@@ -3,3 +3,4 @@ sbv-env/
 __pycache__/
 *.pyc
 .venv/
+CLAUDE.md

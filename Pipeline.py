@@ -20,6 +20,7 @@ sum_gen_prompt = PromptTemplate(
     input_variables=["func_name", "libc_code"],
     template = """#Task: You are a senior software engineer and need to write a summary of the follwoing C library function {func_name}
     for symbolic testing, the summary must conform to the API guidelines.
+    Your answer must not include any other text or explanation, only the C code block.
     #Rules of the API:
     ## Symbolic Reflection API
 
@@ -122,8 +123,9 @@ sum_gen_prompt = PromptTemplate(
     """
 )
 glibc_func_prompt = PromptTemplate(
-    input_variables=["func_name"]
-    template = """#Task: fetch the source code of the glibc function {func_name} from the official glibc repository and return it as a C code block."""
+    input_variables=["func_name"],
+    template = """#Task: fetch the source code of the glibc function {func_name} from the local glibc repository and return it as a C code block.
+    you must not include any other text or explanation, only the C code block."""
 )
 
 def extract_c_code(text: str) -> str:
@@ -134,9 +136,11 @@ def extract_c_code(text: str) -> str:
 
 
 if __name__ == "__main__":
-    func_name = sys.argv[1]
+    #func_name = sys.argv[1]
+    func_name = "printf"
     chain_glib = glibc_func_prompt | llm
     func_code_response = chain_glib.invoke({"func_name": func_name})
+    print(func_code_response.content)
 
     chain_gensum = sum_gen_prompt | llm
     response = chain_gensum.invoke({"func_name": func_name, "libc_code": extract_c_code(func_code_response.content)})

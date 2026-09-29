@@ -16,7 +16,7 @@ llm = ChatOpenAI(
     base_url= "https://morpheus.cit.tum.de/api/v1",
     api_key= MORPHEUS_API_KEY
 )
-prompt = PromptTemplate(
+sum_gen_prompt = PromptTemplate(
     input_variables=["func_name", "libc_code"],
     template = """#Task: You are a senior software engineer and need to write a summary of the follwoing C library function {func_name}
     for symbolic testing, the summary must conform to the API guidelines.
@@ -121,16 +121,23 @@ prompt = PromptTemplate(
     ```
     """
 )
+glibc_func_prompt = PromptTemplate(
+    input_variables=["func_name"]
+    template = """#Task: fetch the source code of the glibc function {func_name} from the official glibc repository and return it as a C code block."""
+)
 
 def extract_c_code(text: str) -> str:
-    blocks = re.findall(r"```(?:c|C)?[ \t]*\n(.*?)```", text, re.S)
-    if not blocks:
+    code = re.findall(r"```(?:c|C)?[ \t]*\n(.*?)```", text, re.S)
+    if not code:
         raise ValueError("no C code found in LLM response")
-    return "\n".join(blocks).strip() + "\n"
+    return "\n".join(code).strip() + "\n"
 
 
 if __name__ == "__main__":
-    func_name, libc_path = sys.argv[1], sys.argv[2]
-    chain = prompt | llm
-    response = chain.invoke({"func_name": func_name, "libc_code": Path(libc_path).read_text()})
+    func_name = sys.argv[1]
+    chain_glib = glibc_func_prompt | llm
+    func_code_response = chain_glib.invoke({"func_name": func_name})
+
+    chain_gensum = sum_gen_prompt | llm
+    response = chain_gensum.invoke({"func_name": func_name, "libc_code": extract_c_code(func_code_response.content)})
     print(extract_c_code(response.content))

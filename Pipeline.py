@@ -1,5 +1,7 @@
 import os
 import re
+import subprocess
+import sys
 
 from pathlib import Path
 
@@ -7,16 +9,19 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 
-from LibCCode import get_glib_code
+from LibCCode import *
 
 load_dotenv()
 MORPHEUS_API_KEY = os.environ["MORPHEUS_API_KEY"]
+BASE_PATH = "~/_Uni/BA"
 
+#Morpheus LLM API setup
 llm = ChatOpenAI(
     model= "google/gemma-4-31B-it",
     base_url= "https://morpheus.cit.tum.de/api/v1",
     api_key= MORPHEUS_API_KEY
 )
+#Prompt for generating symbolic summaries -> contains rules/functions for symbolic reflection API
 sum_gen_prompt = PromptTemplate(
     input_variables=["func_name", "libc_code"],
     template = """#Task: You are a senior software engineer and need to write a summary of the follwoing C library function {func_name}
@@ -34,11 +39,11 @@ sum_gen_prompt = PromptTemplate(
     - Ordinary C arithmetic on symbolic values is allowed. It yields a symbolic
     expression (e.g. `n = len + 1`).
     - A C `if`/`while` whose condition depends on a symbolic value forks the
-    execution into several paths. Decide branches with `__is_certain` / `__is_sat`
+    execution into several paths. Decide branches with `is_certain` / `is_sat`
     and merge results with `_ITE_VAR_` instead.
     - Constraints (`cnstr_t`) are opaque handles, not booleans. Never combine or
     test them with `!`, `&&`, `||`, `==` or `if (c)`. Use the constructors below,
-    and query them with `__is_certain` / `__is_sat`.
+    and query them with `is_certain` / `is_sat`.
     - Sizes of symbolic variables are given in bits (char = 8, int = 32, 32-bit
     target).
 
@@ -51,24 +56,24 @@ sum_gen_prompt = PromptTemplate(
     ### 1. Symbolic values
     | Function | Meaning |
     |---|---|
-    | `symbolic __sym_var(size_t bits)` | fresh unconstrained symbolic value |
-    | `symbolic __sym_var_named(char *name, size_t bits)` | same, with a given name |
-    | `symbolic __sym_var_array(char *name, size_t index, size_t bits)` | fresh value for cell `name[index]` |
-    | `int __is_symbolic(symbolic v)` | 1 if `v` is symbolic, else 0 |
-    | `long __concretize(symbolic v)` | one concrete value `v` may take (adds nothing to the path condition) |
-    | `long __maximize(symbolic v)` | largest value `v` may take |
-    | `long __minimize(symbolic v)` | smallest value `v` may take |
+    | `symbolic sym_var(size_t bits)` | fresh unconstrained symbolic value |
+    | `symbolic sym_var_named(char *name, size_t bits)` | same, with a given name |
+    | `symbolic sym_var_array(char *name, size_t index, size_t bits)` | fresh value for cell `name[index]` |
+    | `int is_symbolic(symbolic v)` | 1 if `v` is symbolic, else 0 |
+    | `long concretize(symbolic v)` | one concrete value `v` may take (adds nothing to the path condition) |
+    | `long maximize(symbolic v)` | largest value `v` may take |
+    | `long minimize(symbolic v)` | smallest value `v` may take |
 
     ### 2. Path condition and solver
     | Function | Meaning |
     |---|---|
-    | `int __is_certain(cnstr_t c)` | 1 if the path condition implies `c` (true on every path) |
-    | `int __is_sat(cnstr_t c)` | 1 if `c` can hold together with the path condition |
-    | `void __assume(cnstr_t c)` | adds `c` to the path condition (drops the executions where `c` is false) |
-    | `void __assert(cnstr_t c)` | fails if the path condition does not imply `c` |
-    | `void __push_pc(void)` | saves the current path condition |
-    | `void __pop_pc(void)` | restores the last saved path condition |
-    | `void __report_error(const char *file, unsigned int line, const char *msg)` | reports an error, does not return |
+    | `int is_certain(cnstr_t c)` | 1 if the path condition implies `c` (true on every path) |
+    | `int is_sat(cnstr_t c)` | 1 if `c` can hold together with the path condition |
+    | `void assume(cnstr_t c)` | adds `c` to the path condition (drops the executions where `c` is false) |
+    | `void assert(cnstr_t c)` | fails if the path condition does not imply `c` |
+    | `void push_pc(void)` | saves the current path condition |
+    | `void pop_pc(void)` | restores the last saved path condition |
+    | `void report_error(const char *file, unsigned int line, const char *msg)` | reports an error, does not return |
 
     ### 3. Constraint constructors (all return `cnstr_t`)
     - Logic: `_NOT_(c)`, `_AND_(c1, c2)`, `_OR_(c1, c2)`
@@ -81,41 +86,41 @@ sum_gen_prompt = PromptTemplate(
     ### 4. Memory
     | Function | Meaning |
     |---|---|
-    | `void *__mem_alloc(size_t nbytes)` | allocates a heap block (a symbolic size is maximized) |
-    | `void __mem_free(void *p)` | frees a block returned by `__mem_alloc` |
-    | `size_t __n_allocd(void *p)` | size of a block returned by `__mem_alloc` |
-    | `void __allocd(void *p, size_t n)` | fails unless bytes `p .. p+n` are readable and writable |
-    | `void __cond_write(void *p, symbolic v, cnstr_t pc)` | writes `pc ? v : old` to `*p`; a symbolic `p` writes to every address it may denote |
+    | `void *mem_alloc(size_t nbytes)` | allocates a heap block (a symbolic size is maximized) |
+    | `void mem_free(void *p)` | frees a block returned by `mem_alloc` |
+    | `size_t n_allocd(void *p)` | size of a block returned by `mem_alloc` |
+    | `void allocd(void *p, size_t n)` | fails unless bytes `p .. p+n` are readable and writable |
+    | `void cond_write(void *p, symbolic v, cnstr_t pc)` | writes `pc ? v : old` to `*p`; a symbolic `p` writes to every address it may denote |
 
     ### 5. Symbolic lists (for memory segments of symbolic length)
-    `list_t __lst_mk(void)` (empty), `list_t __lst_cons(symbolic v, list_t l)`,
-    `symbolic __lst_hd(list_t l)`, `list_t __lst_tl(list_t l)`,
-    `cnstr_t __lst_empty(list_t l)`, `size_t __lst_len(list_t l)`,
-    `list_t __lst_nbytes(char c, size_t n)`, `list_t __lst_zeros(size_t n)`
+    `list_t lst_mk(void)` (empty), `list_t lst_cons(symbolic v, list_t l)`,
+    `symbolic lst_hd(list_t l)`, `list_t lst_tl(list_t l)`,
+    `cnstr_t lst_empty(list_t l)`, `size_t lst_len(list_t l)`,
+    `list_t lst_nbytes(char c, size_t n)`, `list_t lst_zeros(size_t n)`
 
     ### Usage patterns
     **Case split (exact).** Checks `cond` without forking and merges both branches
     into one path:
     ```c
     int r;
-    if (__is_certain(cond))            {{ r = A; }}
-    else if (__is_certain(_NOT_(cond))) {{ r = B; }}
+    if (is_certain(cond))            {{ r = A; }}
+    else if (is_certain(_NOT_(cond))) {{ r = B; }}
     else {{
-    __push_pc(); __assume(cond);        r = A; int a = r; __pop_pc();
-    __push_pc(); __assume(_NOT_(cond)); r = B; int b = r; __pop_pc();
+    push_pc(); assume(cond);        r = A; int a = r; pop_pc();
+    push_pc(); assume(_NOT_(cond)); r = B; int b = r; pop_pc();
     r = _ITE_VAR_(cond, a, b);
     }}
     ```
 
     **Recursion over a string.** Recurse on `s + 1` until
-    `__is_certain(_EQ_(*s, '\0'))`. The inputs are bounded, so this terminates.
+    `is_certain(_EQ_(*s, '\0'))`. The inputs are bounded, so this terminates.
 
     **How primitives affect the approximation**
     - Exact: every case is kept (case split + `_ITE_VAR_`).
-    - Under-approximation: `__assume` keeps only some executions. Examples: assume
-    one branch only, or concretize with `v = __maximize(x); __assume(_EQ_(x, v));`.
-    - Over-approximation: return a fresh `__sym_var(bits)`, possibly constrained by
-    `__assume` to a range that contains every real result.
+    - Under-approximation: `assume` keeps only some executions. Examples: assume
+    one branch only, or concretize with `v = maximize(x); assume(_EQ_(x, v));`.
+    - Over-approximation: return a fresh `sym_var(bits)`, possibly constrained by
+    `assume` to a range that contains every real result.
     
     #Library function code:
     ```c
@@ -123,16 +128,38 @@ sum_gen_prompt = PromptTemplate(
     ```
     """
 )
+#Prompt for generating concrete testfile for SummboundVerify
+concrete_gen_prompt = PromptTemplate(
+    input_variables=["func_name", "libc_code"],
+    template="""#Task: You are a senior software engineer. Rewrite the following musl libc function {func_name}
+    as a self-contained C file that behaves exactly the same.
+    Your answer must not include any other text or explanation, only the C code block.
+    #Rules:
+    - Rename the function to concrete_{func_name}; keep parameter and return types otherwise identical.
+    - No #include, #define, #ifdef or other preprocessor directives.
+    - Do not define size_t, ssize_t or NULL (they are already provided). Do not use uintptr_t, use unsigned long.
+    - No GNU extensions (__attribute__, typeof, statement expressions, inline asm, builtins).
+    - Use plain byte-wise C only (no word-at-a-time/alignment tricks). The file is parsed by pycparser.
+    - If the function calls other libc functions, implement them in the same file as static helpers.
+
+    #Library function code:
+    ```c
+    {libc_code}
+    ```
+"""
+)
 
 '''
+#Substituted -> using LibCCode.py to fetch code from local glibc folder (using: https://gitlab.com/gnutools/glibc/-/tree/master?ref_type=heads)
+#Prompt for looking up the glibc source code in official repo
 glibc_func_prompt = PromptTemplate(
     input_variables=["func_name"],
-    template = """#Task: fetch the source code of the glibc function {func_name} from the local glibc repository and return it as a C code block.
+    template = """#Task: fetch the source code of the glibc function {func_name} from the official glibc repository and return it as a C code block.
     you must not include any other text or explanation, only the C code block."""
 )
 '''
 
-
+#extract C code from LLM response
 def extract_c_code(text: str) -> str:
     code = re.findall(r"```(?:c|C)?[ \t]*\n(.*?)```", text, re.S)
     if not code:
@@ -141,13 +168,57 @@ def extract_c_code(text: str) -> str:
 
 
 if __name__ == "__main__":
+    #fetching glibc code
     #func_name = sys.argv[1]
-    func_name = "printf"
-    func_code = get_glib_code(func_name)
+    func_name = "strlen"
+    func_code = get_musl_code(func_name)
+    print(f"Fetched musl-code for {func_name}:")
     print(func_code)
 
+    #generating symbolic summary with LLM
     chain_gensum = sum_gen_prompt | llm
     response = chain_gensum.invoke({"func_name": func_name, "libc_code": func_code})
-    print(extract_c_code(response.content))
+    summary = extract_c_code(response.content)
+    print("Generated summary:")
+    print(summary)
 
+    cur_dir = Path(BASE_PATH).expanduser() / "cur_Files"
+    cur_dir.mkdir(parents=True, exist_ok=True)
+    summ_path = cur_dir / "cur_summary.c"
+    summ_path.write_text(summary)
 
+    #generate concrete.c (header-free) for sbv call
+    chain_genconcrete = concrete_gen_prompt | llm
+    response = chain_genconcrete.invoke({"func_name": func_name, "libc_code": func_code})
+    concrete_code = extract_c_code(response.content)
+    concrete_code = re.sub(r"^\s*#\s*include.*\n", "", concrete_code, flags=re.M)
+    concrete_path = cur_dir / "cur_concrete.c"
+    concrete_path.write_text(concrete_code)
+    print("Generated concrete code:")
+    print(concrete_code)
+
+    #generating + compiling Testfile with SummBoundVerify -> cur_Files/<func>_validation.c / .test
+    test_path = cur_dir / f"{func_name}_validation.c"
+    testgen = subprocess.run(
+        [str(Path(sys.executable).parent / "summbv"),
+        "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
+        "-summ", str(summ_path), "--summname", func_name,
+        "-o", str(test_path), "--compile", "x64"],
+        capture_output=True,
+        text=True
+    )
+    print(testgen.stdout)
+    print(testgen.stderr)
+
+    #executing Testfile
+    subprocess.run(
+        [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
+        str(cur_dir / f"{func_name}_validation.test"), "--results", 
+        str(cur_dir), "-ascii"],
+        capture_output=True,
+        text=True
+    )
+
+    #skipp regeneration of symbolic summary if counterexamples is empty
+
+    #return summary and counterexamples

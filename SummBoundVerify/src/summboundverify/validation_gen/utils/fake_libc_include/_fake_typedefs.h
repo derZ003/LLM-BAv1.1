@@ -5,7 +5,7 @@ typedef void* symbolic;
 typedef unsigned int cnstr_t;
 typedef int state_t; 
 typedef unsigned int result_t; 
-
+typedef unsigned int list_t; //added by me to ensure running (30.9)
 typedef int size_t;
 typedef int __builtin_va_list;
 typedef int __gnuc_va_list;

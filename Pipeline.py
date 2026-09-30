@@ -1,12 +1,13 @@
 import os
 import re
-import sys
 
 from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
+
+from LibCCode import get_glib_code
 
 load_dotenv()
 MORPHEUS_API_KEY = os.environ["MORPHEUS_API_KEY"]
@@ -122,11 +123,15 @@ sum_gen_prompt = PromptTemplate(
     ```
     """
 )
+
+'''
 glibc_func_prompt = PromptTemplate(
     input_variables=["func_name"],
     template = """#Task: fetch the source code of the glibc function {func_name} from the local glibc repository and return it as a C code block.
     you must not include any other text or explanation, only the C code block."""
 )
+'''
+
 
 def extract_c_code(text: str) -> str:
     code = re.findall(r"```(?:c|C)?[ \t]*\n(.*?)```", text, re.S)
@@ -138,10 +143,11 @@ def extract_c_code(text: str) -> str:
 if __name__ == "__main__":
     #func_name = sys.argv[1]
     func_name = "printf"
-    chain_glib = glibc_func_prompt | llm
-    func_code_response = chain_glib.invoke({"func_name": func_name})
-    print(func_code_response.content)
+    func_code = get_glib_code(func_name)
+    print(func_code)
 
     chain_gensum = sum_gen_prompt | llm
-    response = chain_gensum.invoke({"func_name": func_name, "libc_code": extract_c_code(func_code_response.content)})
+    response = chain_gensum.invoke({"func_name": func_name, "libc_code": func_code})
     print(extract_c_code(response.content))
+
+

@@ -21,12 +21,14 @@ llm = ChatOpenAI(
     base_url= "https://morpheus.cit.tum.de/api/v1",
     api_key= MORPHEUS_API_KEY
 )
-#Prompt for generating symbolic summaries -> contains rules/functions for symbolic reflection API
-sum_gen_prompt = PromptTemplate(
-    input_variables=["func_name", "libc_code"],
-    template = """#Task: You are a senior software engineer and need to write a summary of the follwoing C library function {func_name}
-    for symbolic testing, the summary must conform to the API guidelines.
-    Your answer must not include any other text or explanation, only the C code block.
+#Output rules shared by the summary prompts
+SUMMARY_OUTPUT_RULES = """
+    #Output rules:
+    - Output exactly ONE C code block containing only the final version; no drafts or alternatives.
+    - Define {func_name} exactly once. Helper functions are allowed but must be static and have different names.
+"""
+#Rules/functions of the symbolic reflection API, shared by the summary prompts
+SYMBOLIC_API_RULES = """
     #Rules of the API:
     ## Symbolic Reflection API
 
@@ -121,7 +123,14 @@ sum_gen_prompt = PromptTemplate(
     one branch only, or concretize with `v = maximize(x); assume(_EQ_(x, v));`.
     - Over-approximation: return a fresh `sym_var(bits)`, possibly constrained by
     `assume` to a range that contains every real result.
-    
+"""
+#Prompt for generating symbolic summaries
+sum_gen_prompt = PromptTemplate(
+    input_variables=["func_name", "libc_code"],
+    template = """#Task: You are a senior software engineer and need to write a summary of the follwoing C library function {func_name}
+    for symbolic testing, the summary must conform to the API guidelines.
+    Your answer must not include any other text or explanation, only the C code block.
+""" + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
     #Library function code:
     ```c
     {libc_code}
@@ -148,6 +157,30 @@ concrete_gen_prompt = PromptTemplate(
     ```
 """
 )
+#Prompt for revision of symbolic summaries based on SummBoundVerify counterexamples
+revision_gen_prompt = PromptTemplate(
+    input_variables=["func_name", "libc_code", "summary", "counterexamples"],
+    template="""#Task: You are a senior software engineer. The following symbolic summary of the C library function {func_name}
+    was validated against the library code and produced counterexamples: inputs on which the summary and the
+    library function behave differently. Revise the summary so that it fixes these counterexamples and conforms to the API guidelines.
+    Your answer must not include any other text or explanation, only the C code block.
+""" + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
+    #Library function code:
+    ```c
+    {libc_code}
+    ```
+
+    #Current symbolic summary:
+    ```c
+    {summary}
+    ```
+
+    #Counterexamples (SummBoundVerify test results):
+    ```json
+    {counterexamples}
+    ```
+"""
+)
 
 '''
 #Substituted -> using LibCCode.py to fetch code from local glibc folder (using: https://gitlab.com/gnutools/glibc/-/tree/master?ref_type=heads)
@@ -166,6 +199,34 @@ def extract_c_code(text: str) -> str:
         raise ValueError("no C code found in LLM response")
     return "\n".join(code).strip() + "\n"
 
+def gen_symbolic_summary(func_name:str, libc_code:str) -> str: 
+    chain_gensum = sum_gen_prompt | llm
+    response = chain_gensum.invoke({"func_name": func_name, "libc_code": libc_code})
+    summary = extract_c_code(response.content)
+    return summary
+
+def gen_revision_summary(func_name:str, libc_code:str, summary:str, counterexamples:str) -> str:
+    chain_revision = revision_gen_prompt | llm
+    response = chain_revision.invoke({"func_name": func_name, "libc_code": libc_code, "summary": summary, "counterexamples": counterexamples})
+    summary = extract_c_code(response.content)
+    return summary
+
+def gen_concrete_code(func_name:str, libc_code:str) -> str:
+    chain_genconcrete = concrete_gen_prompt | llm
+    response = chain_genconcrete.invoke({"func_name": func_name, "libc_code": libc_code})
+    concrete_code = extract_c_code(response.content)
+    concrete_code = re.sub(r"^\s*#\s*include.*\n", "", concrete_code, flags=re.M)
+    return concrete_code
+
+def write_concrete_cur_Files(concrete_code:str, cur_dir:Path) -> None:
+    concrete_path = cur_dir / "cur_concrete.c"
+    concrete_path.write_text(concrete_code)
+    return
+
+def write_summary_cur_Files(summary:str, cur_dir:Path) -> None:
+    summ_path = cur_dir / "cur_summary.c"
+    summ_path.write_text(summary)
+    return
 
 if __name__ == "__main__":
     #fetching glibc code
@@ -176,29 +237,25 @@ if __name__ == "__main__":
     print(func_code)
 
     #generating symbolic summary with LLM
-    chain_gensum = sum_gen_prompt | llm
-    response = chain_gensum.invoke({"func_name": func_name, "libc_code": func_code})
-    summary = extract_c_code(response.content)
+    summary = gen_symbolic_summary(func_name, func_code)
     print("Generated summary:")
     print(summary)
 
-    cur_dir = Path(BASE_PATH).expanduser() / "cur_Files"
-    cur_dir.mkdir(parents=True, exist_ok=True)
-    summ_path = cur_dir / "cur_summary.c"
-    summ_path.write_text(summary)
-
     #generate concrete.c (header-free) for sbv call
-    chain_genconcrete = concrete_gen_prompt | llm
-    response = chain_genconcrete.invoke({"func_name": func_name, "libc_code": func_code})
-    concrete_code = extract_c_code(response.content)
-    concrete_code = re.sub(r"^\s*#\s*include.*\n", "", concrete_code, flags=re.M)
-    concrete_path = cur_dir / "cur_concrete.c"
-    concrete_path.write_text(concrete_code)
+    concrete_code = gen_concrete_code(func_name, func_code)
     print("Generated concrete code:")
     print(concrete_code)
 
+    #write concrete and summary to cur_Files folder
+    cur_dir = Path(BASE_PATH).expanduser() / "cur_Files"
+    cur_dir.mkdir(parents=True, exist_ok=True)
+    write_concrete_cur_Files(concrete_code, cur_dir)
+    write_summary_cur_Files(summary, cur_dir)
+
     #generating + compiling Testfile with SummBoundVerify -> cur_Files/<func>_validation.c / .test
     test_path = cur_dir / f"{func_name}_validation.c"
+    concrete_path = cur_dir / "cur_concrete.c"
+    summ_path = cur_dir / "cur_summary.c"
     testgen = subprocess.run(
         [str(Path(sys.executable).parent / "summbv"),
         "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
@@ -209,7 +266,6 @@ if __name__ == "__main__":
     )
     print(testgen.stdout)
     print(testgen.stderr)
-
     #executing Testfile
     subprocess.run(
         [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
@@ -218,7 +274,40 @@ if __name__ == "__main__":
         capture_output=True,
         text=True
     )
-
+    test_results_path = cur_dir / f"{func_name}_validation.test_result.json"
     #skipp regeneration of symbolic summary if counterexamples is empty
-
+    if test_results_path.exists():
+        test_results = test_results_path.read_text()
+        i = 0
+        while '"counterexamples": {}' not in test_results and i in range(3):
+            print("counterexamples found, regenerating symbolic summary...")
+            summary = gen_revision_summary(func_name, func_code, summary, test_results)
+            write_summary_cur_Files(summary, cur_dir)
+            test_results = test_results_path.read_text()
+            print(test_results)
+            i += 1
+            #retesting revised summary
+            testgen = subprocess.run(
+            [str(Path(sys.executable).parent / "summbv"),
+            "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
+            "-summ", str(summ_path), "--summname", func_name,
+            "-o", str(test_path), "--compile", "x64"],
+            capture_output=True,
+            text=True
+            )
+            print(testgen.stdout)
+            print(testgen.stderr)
+            #executing Testfile
+            subprocess.run(
+                [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
+                str(cur_dir / f"{func_name}_validation.test"), "--results", 
+                str(cur_dir), "-ascii"],
+                capture_output=True,
+                text=True
+            )
+    else: 
+        print("No test results found, skipping symbolic summary regeneration.")
     #return summary and counterexamples
+    write_summary_cur_Files(summary, cur_dir)
+    print("Final symbolic summary:")
+    print(summary)

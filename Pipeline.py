@@ -86,6 +86,8 @@ SYMBOLIC_API_RULES = """
     - If-then-else over constraints: `_ITE_(cond, c1, c2)`
     - If-then-else over values: `_ITE_VAR_(cond, v1, v2)` returns the symbolic
     value `cond ? v1 : v2`
+    - Constants: `TRUE` (always holds), `FALSE` (never holds). These are the only
+    predefined constraints; do not invent others.
 
     ### 4. Memory
     | Function | Meaning |
@@ -118,6 +120,10 @@ SYMBOLIC_API_RULES = """
 
     **Recursion over a string.** Recurse on `s + 1` until
     `is_certain(_EQ_(*s, '\0'))`. The inputs are bounded, so this terminates.
+
+    **Unconditional write.** Use a plain assignment `*p = v;` or
+    `cond_write(p, v, TRUE)`. Use `cond_write` with another constraint only when
+    the write depends on a symbolic condition.
 
     **How primitives affect the approximation**
     - Exact: every case is kept (case split + `_ITE_VAR_`).
@@ -230,7 +236,9 @@ def write_concrete_cur_Files(concrete_code:str) -> None:
 
 def write_summary_cur_Files(summary:str) -> None:
     summ_path = CUR_DIR / "cur_summary.c"
-    summ_path.write_text(summary)
+    #TRUE/FALSE constraint constants promised to the LLM in SYMBOLIC_API_RULES
+    header = "#ifndef TRUE\n#define TRUE 1\n#endif\n#ifndef FALSE\n#define FALSE 0\n#endif\n"
+    summ_path.write_text(header + summary)
     return
 
 def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str) -> None:
@@ -238,7 +246,8 @@ def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str) 
         [str(Path(sys.executable).parent / "summbv"),
         "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
         "-summ", str(summ_path), "--summname", func_name,
-        "-o", str(test_path), "--compile", "x86", "--lib", str(Path(__file__).parent / "lib.c")],
+        "-o", str(test_path), "--compile", "x86", "--lib", str(Path(__file__).parent / "lib.c"),
+        "--maxvalue", "5"],
         capture_output=True,
         text=True
     )
@@ -260,7 +269,7 @@ def run_test() -> None:
 if __name__ == "__main__":
     #fetching glibc code
     #func_name = sys.argv[1]
-    func_name = "strcasecmp"
+    func_name = "memcpy"
     func_code = get_musl_code(func_name)
 
     #generating symbolic summary with LLM

@@ -266,12 +266,8 @@ def run_test() -> None:
     )
     return
 
-if __name__ == "__main__":
-    #fetching glibc code
-    #func_name = sys.argv[1]
-    func_name = "memcpy"
+def exact_pipeline(func_name: str) -> None:
     func_code = get_musl_code(func_name)
-
     #generating symbolic summary with LLM
     summary = gen_symbolic_summary(func_name, func_code)
 
@@ -296,16 +292,16 @@ if __name__ == "__main__":
         test_results = test_results_path.read_text()
         print("Test results:\n" + test_results)
         i = 0
-        while '"counterexamples": {}' not in test_results and i in range(3):
+        while '"counterexamples": {}' not in test_results and i < 3:
             print("counterexamples found, regenerating symbolic summary...")
             summary = gen_revision_summary(func_name, func_code, summary, test_results)
             write_summary_cur_Files(summary)
-            i += 1
             #retesting revised summary
             gen_test(concrete_path, summ_path, test_path, func_name)
             run_test()
             test_results = test_results_path.read_text()
             print("Updated test results:\n" + test_results)
+            i += 1
     else: 
         print("No test results found, skipping symbolic summary regeneration.")
     #return summary and counterexamples
@@ -316,5 +312,14 @@ if __name__ == "__main__":
         print("Final test results:\n" + test_results)
     else:
         print("No test results found and test failed, try again ;)")
+    return
+
+#TODO: add overapprox pipeline
+
+if __name__ == "__main__":
+    #fetching glibc code
+    #func_name = sys.argv[1]
+    func_name = "memcpy"
+    exact_pipeline(func_name)
 
 

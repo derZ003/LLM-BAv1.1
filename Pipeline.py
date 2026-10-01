@@ -133,7 +133,7 @@ SYMBOLIC_API_RULES = """
     `assume` to a range that contains every real result.
 """
 #Prompt for generating symbolic summaries
-sum_gen_prompt = PromptTemplate(
+exact_sum_gen_prompt = PromptTemplate(
     input_variables=["func_name", "libc_code"],
     template = """#Task: You are a senior software engineer and need to write a summary of the follwoing C library function {func_name}
     for symbolic testing, the summary must conform to the API guidelines.
@@ -190,16 +190,6 @@ revision_gen_prompt = PromptTemplate(
 """
 )
 
-'''
-#Substituted -> using LibCCode.py to fetch code from local glibc folder (using: https://gitlab.com/gnutools/glibc/-/tree/master?ref_type=heads)
-#Prompt for looking up the glibc source code in official repo
-glibc_func_prompt = PromptTemplate(
-    input_variables=["func_name"],
-    template = """#Task: fetch the source code of the glibc function {func_name} from the official glibc repository and return it as a C code block.
-    you must not include any other text or explanation, only the C code block."""
-)
-'''
-
 #extract C code from LLM response
 def extract_c_code(text: str) -> str:
     code = re.findall(r"```(?:c|C)?[ \t]*\n(.*?)```", text, re.S)
@@ -208,7 +198,7 @@ def extract_c_code(text: str) -> str:
     return "\n".join(code).strip() + "\n"
 
 def gen_symbolic_summary(func_name:str, libc_code:str) -> str: 
-    chain_gensum = sum_gen_prompt | llm
+    chain_gensum = exact_sum_gen_prompt | llm
     response = chain_gensum.invoke({"func_name": func_name, "libc_code": libc_code})
     summary = extract_c_code(response.content)
     print("Generated symbolic summary:\n" + summary)

@@ -1,3 +1,4 @@
+from genericpath import exists
 import os
 import re
 import subprocess
@@ -14,6 +15,7 @@ from LibCCode import *
 load_dotenv()
 MORPHEUS_API_KEY = os.environ["MORPHEUS_API_KEY"]
 BASE_PATH = "~/_Uni/BA"
+CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files"
 
 #Morpheus LLM API setup
 llm = ChatOpenAI(
@@ -203,12 +205,14 @@ def gen_symbolic_summary(func_name:str, libc_code:str) -> str:
     chain_gensum = sum_gen_prompt | llm
     response = chain_gensum.invoke({"func_name": func_name, "libc_code": libc_code})
     summary = extract_c_code(response.content)
+    print("Generated symbolic summary:\n" + summary)
     return summary
 
 def gen_revision_summary(func_name:str, libc_code:str, summary:str, counterexamples:str) -> str:
     chain_revision = revision_gen_prompt | llm
     response = chain_revision.invoke({"func_name": func_name, "libc_code": libc_code, "summary": summary, "counterexamples": counterexamples})
     summary = extract_c_code(response.content)
+    print("Generated revised-symbolic summary:\n" + summary)
     return summary
 
 def gen_concrete_code(func_name:str, libc_code:str) -> str:
@@ -216,98 +220,92 @@ def gen_concrete_code(func_name:str, libc_code:str) -> str:
     response = chain_genconcrete.invoke({"func_name": func_name, "libc_code": libc_code})
     concrete_code = extract_c_code(response.content)
     concrete_code = re.sub(r"^\s*#\s*include.*\n", "", concrete_code, flags=re.M)
+    print("Generated concrete code:\n" + concrete_code)
     return concrete_code
 
-def write_concrete_cur_Files(concrete_code:str, cur_dir:Path) -> None:
-    concrete_path = cur_dir / "cur_concrete.c"
+def write_concrete_cur_Files(concrete_code:str) -> None:
+    concrete_path = CUR_DIR / "cur_concrete.c"
     concrete_path.write_text(concrete_code)
     return
 
-def write_summary_cur_Files(summary:str, cur_dir:Path) -> None:
-    summ_path = cur_dir / "cur_summary.c"
+def write_summary_cur_Files(summary:str) -> None:
+    summ_path = CUR_DIR / "cur_summary.c"
     summ_path.write_text(summary)
+    return
+
+def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str) -> None:
+    testgen = subprocess.run(
+        [str(Path(sys.executable).parent / "summbv"),
+        "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
+        "-summ", str(summ_path), "--summname", func_name,
+        "-o", str(test_path), "--compile", "x86", "--lib", str(Path(__file__).parent / "lib.c")],
+        capture_output=True,
+        text=True
+    )
+    print("stdout: \n" + testgen.stdout)
+    print("stderr: \n" + testgen.stderr)
+    return
+
+def run_test() -> None:
+    #executing Testfile
+    subprocess.run(
+        [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
+        str(CUR_DIR / f"{func_name}_validation.test"), "--results", 
+        str(CUR_DIR), "-ascii"],
+        capture_output=True,
+        text=True
+    )
     return
 
 if __name__ == "__main__":
     #fetching glibc code
     #func_name = sys.argv[1]
-    func_name = "strlen"
+    func_name = "strcasecmp"
     func_code = get_musl_code(func_name)
-    print(f"Fetched musl-code for {func_name}:")
-    print(func_code)
 
     #generating symbolic summary with LLM
     summary = gen_symbolic_summary(func_name, func_code)
-    print("Generated summary:")
-    print(summary)
 
     #generate concrete.c (header-free) for sbv call
     concrete_code = gen_concrete_code(func_name, func_code)
-    print("Generated concrete code:")
-    print(concrete_code)
 
     #write concrete and summary to cur_Files folder
-    cur_dir = Path(BASE_PATH).expanduser() / "cur_Files"
-    cur_dir.mkdir(parents=True, exist_ok=True)
-    write_concrete_cur_Files(concrete_code, cur_dir)
-    write_summary_cur_Files(summary, cur_dir)
+    write_concrete_cur_Files(concrete_code)
+    write_summary_cur_Files(summary)
 
     #generating + compiling Testfile with SummBoundVerify -> cur_Files/<func>_validation.c / .test
-    test_path = cur_dir / f"{func_name}_validation.c"
-    concrete_path = cur_dir / "cur_concrete.c"
-    summ_path = cur_dir / "cur_summary.c"
-    testgen = subprocess.run(
-        [str(Path(sys.executable).parent / "summbv"),
-        "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
-        "-summ", str(summ_path), "--summname", func_name,
-        "-o", str(test_path), "--compile", "x64"],
-        capture_output=True,
-        text=True
-    )
-    print(testgen.stdout)
-    print(testgen.stderr)
-    #executing Testfile
-    subprocess.run(
-        [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
-        str(cur_dir / f"{func_name}_validation.test"), "--results", 
-        str(cur_dir), "-ascii"],
-        capture_output=True,
-        text=True
-    )
-    test_results_path = cur_dir / f"{func_name}_validation.test_result.json"
+    test_path = CUR_DIR / f"{func_name}_validation.c"
+    concrete_path = CUR_DIR / "cur_concrete.c"
+    summ_path = CUR_DIR / "cur_summary.c"
+
+    gen_test(concrete_path, summ_path, test_path, func_name)
+    run_test()
+
+    test_results_path = CUR_DIR / f"{func_name}_validation.test_result.json"
     #skipp regeneration of symbolic summary if counterexamples is empty
     if test_results_path.exists():
         test_results = test_results_path.read_text()
+        print("Test results:\n" + test_results)
         i = 0
         while '"counterexamples": {}' not in test_results and i in range(3):
             print("counterexamples found, regenerating symbolic summary...")
             summary = gen_revision_summary(func_name, func_code, summary, test_results)
-            write_summary_cur_Files(summary, cur_dir)
-            test_results = test_results_path.read_text()
-            print(test_results)
+            write_summary_cur_Files(summary)
             i += 1
             #retesting revised summary
-            testgen = subprocess.run(
-            [str(Path(sys.executable).parent / "summbv"),
-            "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
-            "-summ", str(summ_path), "--summname", func_name,
-            "-o", str(test_path), "--compile", "x64"],
-            capture_output=True,
-            text=True
-            )
-            print(testgen.stdout)
-            print(testgen.stderr)
-            #executing Testfile
-            subprocess.run(
-                [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
-                str(cur_dir / f"{func_name}_validation.test"), "--results", 
-                str(cur_dir), "-ascii"],
-                capture_output=True,
-                text=True
-            )
+            gen_test(concrete_path, summ_path, test_path, func_name)
+            run_test()
+            test_results = test_results_path.read_text()
+            print("Updated test results:\n" + test_results)
     else: 
         print("No test results found, skipping symbolic summary regeneration.")
     #return summary and counterexamples
-    write_summary_cur_Files(summary, cur_dir)
-    print("Final symbolic summary:")
-    print(summary)
+    write_summary_cur_Files(summary)
+    print("Final symbolic summary:\n" + summary)
+    if test_results_path.exists():
+        test_results = test_results_path.read_text()
+        print("Final test results:\n" + test_results)
+    else:
+        print("No test results found and test failed, try again ;)")
+
+

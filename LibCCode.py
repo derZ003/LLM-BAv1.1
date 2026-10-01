@@ -36,9 +36,13 @@ def find_musl_file(func_name):
     return min(candidates, key=lambda p: ("arch" in p.parts, len(p.parts), str(p)))
 
 def get_glib_code(func_name):
-    return remove_comments(find_glib_file(func_name).read_text(errors="replace"))
+    func_code = remove_comments(find_glib_file(func_name).read_text(errors="replace"))
+    print(f"Fetched glib-code for {func_name}: \n" + func_code)
+    return func_code
 def get_musl_code(func_name):
-    return remove_comments(find_musl_file(func_name).read_text(errors="replace"))
+    func_code = remove_comments(find_musl_file(func_name).read_text(errors="replace"))
+    print(f"Fetched musl-code for {func_name}: \n" + func_code)
+    return func_code
 
 def get_glib_codepath(func_name):
     return str(find_glib_file(func_name))

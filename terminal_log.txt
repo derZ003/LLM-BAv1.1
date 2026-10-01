@@ -107,3 +107,255 @@ int printf(const char *format, ...) {
     
     return (int)ret_val;
 }
+
+############################################################################################
+Fetched musl-code for strcasecmp: 
+#include <strings.h>
+#include <ctype.h>
+
+int strcasecmp(const char *_l, const char *_r)
+{
+        const unsigned char *l=(void *)_l, *r=(void *)_r;
+        for (; *l && *r && (*l == *r || tolower(*l) == tolower(*r)); l++, r++);
+        return tolower(*l) - tolower(*r);
+}
+
+int __strcasecmp_l(const char *l, const char *r, locale_t loc)
+{
+        return strcasecmp(l, r);
+}
+
+weak_alias(__strcasecmp_l, strcasecmp_l);
+
+Generated symbolic summary:
+static symbolic sym_tolower(symbolic c) {
+    cnstr_t is_upper = _AND_(_GE_(c, 'A'), _LE_(c, 'Z'));
+    return _ITE_VAR_(is_upper, c + ('a' - 'A'), c);
+}
+
+int strcasecmp(const char *_l, const char *_r) {
+    symbolic l_val, r_val;
+    size_t i = 0;
+
+    while (1) {
+        allocd((void *)_l, i + 1);
+        allocd((void *)_r, i + 1);
+        l_val = (symbolic)((unsigned char)_l[i]);
+        r_val = (symbolic)((unsigned char)_r[i]);
+
+        cnstr_t l_null = _EQ_(l_val, 0);
+        cnstr_t r_null = _EQ_(r_val, 0);
+        
+        symbolic tl = sym_tolower(l_val);
+        symbolic tr = sym_tolower(r_val);
+        cnstr_t eq_case = _EQ_(tl, tr);
+
+        cnstr_t loop_cond = _AND_(_NOT_(l_null), _AND_(_NOT_(r_null), eq_case));
+
+        if (is_certain(loop_cond)) {
+            i++;
+            continue;
+        } else if (is_certain(_NOT_(loop_cond))) {
+            break;
+        } else {
+            push_pc();
+            assume(loop_cond);
+            // This path continues the loop, but for symbolic summary recursion/iteration 
+            // we handle the termination via the loop break logic.
+            // To avoid infinite loop in symbolic engine, we effectively "skip" to the break
+            // but the logic is handled by the ITE merge.
+            pop_pc();
+            break;
+        }
+    }
+
+    allocd((void *)_l, i + 1);
+    allocd((void *)_r, i + 1);
+    symbolic final_l = sym_tolower((symbolic)((unsigned char)_l[i]));
+    symbolic final_r = sym_tolower((symbolic)((unsigned char)_r[i]));
+
+    return (int)(final_l - final_r);
+}
+
+Generated concrete code:
+static int concrete_tolower(int c)
+{
+        if (c >= 65 && c <= 90)
+        {
+                return c + 32;
+        }
+        return c;
+}
+
+int concrete_strcasecmp(const char *_l, const char *_r)
+{
+        const unsigned char *l = (const unsigned char *)_l;
+        const unsigned char *r = (const unsigned char *)_r;
+        while (*l != 0 && *r != 0 && (*l == *r || concrete_tolower(*l) == concrete_tolower(*r)))
+        {
+                l++;
+                r++;
+        }
+        return concrete_tolower(*l) - concrete_tolower(*r);
+}
+
+stdout: 
+
+stderr: 
+(Info) Compiling:
+ gcc -Wall -O0 -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-variable -fno-builtin -m32 /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c -o /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.test /home/flo/_Uni/BA/lib.c
+(Warning) /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c: In function ‘strcasecmp’:
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:80:13: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+   80 |     l_val = (symbolic) ((unsigned char) _l[i]);
+      |             ^
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:81:13: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+   81 |     r_val = (symbolic) ((unsigned char) _r[i]);
+      |             ^
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:109:34: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+  109 |   symbolic final_l = sym_tolower((symbolic) ((unsigned char) _l[i]));
+      |                                  ^
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:110:34: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+  110 |   symbolic final_r = sym_tolower((symbolic) ((unsigned char) _r[i]));
+      |                                  ^
+
+
+counterexamples found, regenerating symbolic summary...
+stdout: 
+
+stderr: 
+(Info) Compiling:
+ gcc -Wall -O0 -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-variable -fno-builtin -m32 /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c -o /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.test /home/flo/_Uni/BA/lib.c
+(Warning) /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c: In function ‘strcasecmp’:
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:80:13: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+   80 |     l_val = (symbolic) ((unsigned char) _l[i]);
+      |             ^
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:81:13: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+   81 |     r_val = (symbolic) ((unsigned char) _r[i]);
+      |             ^
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:111:34: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+  111 |   symbolic final_l = sym_tolower((symbolic) ((unsigned char) _l[i]));
+      |                                  ^
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:112:34: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+  112 |   symbolic final_r = sym_tolower((symbolic) ((unsigned char) _r[i]));
+      |                                  ^
+
+
+Updated test results:
+{
+  "strcasecmp_validation.test_1": {
+    "result": "bug",
+    "npaths": 1,
+    "counterexamples": {
+      "over-approximation": {
+        "_l": {
+          "_l_0": "P",
+          "_l_1": "O",
+          "_l_2": 4,
+          "_l_3": 128,
+          "_l_4": "Not in model"
+        },
+        "_r": {
+          "_r_0": "p",
+          "_r_1": "o",
+          "_r_2": 0,
+          "_r_3": 160,
+          "_r_4": "Not in model"
+        },
+        "ret": 4
+      },
+      "under-approximation": {
+        "_l": {
+          "_l_0": "G",
+          "_l_1": "R",
+          "_l_2": "R",
+          "_l_3": ".",
+          "_l_4": "Not in model"
+        },
+        "_r": {
+          "_r_0": "g",
+          "_r_1": "E",
+          "_r_2": "\"",
+          "_r_3": 128,
+          "_r_4": "Not in model"
+        },
+        "ret": 0
+      }
+    }
+  }
+}
+counterexamples found, regenerating symbolic summary...
+stdout: 
+
+stderr: 
+(Info) Compiling:
+ gcc -Wall -O0 -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-variable -fno-builtin -m32 /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c -o /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.test /home/flo/_Uni/BA/lib.c
+(Warning) /home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c: In function ‘strcasecmp_recursive’:
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:75:20: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+   75 |   symbolic l_val = (symbolic) ((unsigned char) _l[i]);
+      |                    ^
+/home/flo/_Uni/BA/cur_Files/strcasecmp_validation.c:76:20: warning: cast to pointer from integer of different size [-Wint-to-pointer-cast]
+   76 |   symbolic r_val = (symbolic) ((unsigned char) _r[i]);
+      |                    ^
+
+
+Updated test results:
+{
+  "strcasecmp_validation.test_1": {
+    "result": "exact",
+    "npaths": 1,
+    "counterexamples": {}
+  }
+}
+Final symbolic summary:
+static symbolic sym_tolower(symbolic c) {
+    cnstr_t is_upper = _AND_(_GE_(c, 'A'), _LE_(c, 'Z'));
+    return _ITE_VAR_(is_upper, c + ('a' - 'A'), c);
+}
+
+static int strcasecmp_recursive(const char *_l, const char *_r, size_t i) {
+    allocd((void *)_l, i + 1);
+    allocd((void *)_r, i + 1);
+    
+    symbolic l_val = (symbolic)((unsigned char)_l[i]);
+    symbolic r_val = (symbolic)((unsigned char)_r[i]);
+    
+    symbolic tl = sym_tolower(l_val);
+    symbolic tr = sym_tolower(r_val);
+    
+    cnstr_t l_null = _EQ_(l_val, 0);
+    cnstr_t r_null = _EQ_(r_val, 0);
+    cnstr_t eq_case = _EQ_(tl, tr);
+    
+    cnstr_t loop_cond = _AND_(_NOT_(l_null), _AND_(_NOT_(r_null), eq_case));
+    
+    if (is_certain(loop_cond)) {
+        return strcasecmp_recursive(_l, _r, i + 1);
+    } else if (is_certain(_NOT_(loop_cond))) {
+        return (int)(tl - tr);
+    } else {
+        push_pc();
+        assume(loop_cond);
+        int res_continue = strcasecmp_recursive(_l, _r, i + 1);
+        pop_pc();
+        
+        push_pc();
+        assume(_NOT_(loop_cond));
+        int res_break = (int)(tl - tr);
+        pop_pc();
+        
+        return (int)_ITE_VAR_(loop_cond, (symbolic)res_continue, (symbolic)res_break);
+    }
+}
+
+int strcasecmp(const char *_l, const char *_r) {
+    return strcasecmp_recursive(_l, _r, 0);
+}
+
+Final test results:
+{
+  "strcasecmp_validation.test_1": {
+    "result": "exact",
+    "npaths": 1,
+    "counterexamples": {}
+  }
+}

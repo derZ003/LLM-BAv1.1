@@ -26,38 +26,38 @@ void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
 void allocd(void* ptr, size_t size) {return;}
-void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 
 #define POINTER_SIZE 5
 #define FUEL 5
 #define ARRAY_SIZE_1 5
 #define MAX_NUM_1 5
 
-void *concrete_memcpy(void *dest, const void *src, size_t n)
+void *concrete_memcpy(void *s1, const void *s2, size_t n)
 {
-  unsigned char *d = (unsigned char *) dest;
-  const unsigned char *s = (const unsigned char *) src;
-  while (n > 0)
+  unsigned char *r1 = (unsigned char *) s1;
+  const unsigned char *r2 = (const unsigned char *) s2;
+  while (n != 0)
   {
-    *d = *s;
-    d++;
-    s++;
+    *r1 = *r2;
+    r1++;
+    r2++;
     n--;
   }
 
-  return dest;
+  return s1;
 }
 
-void *memcpy(void * restrict dest, const void * restrict src, size_t n)
+void *memcpy(void *dest, const void *src, size_t n)
 {
-  unsigned char *d = (unsigned char *) dest;
-  const unsigned char *s = (const unsigned char *) src;
-  allocd(dest, n);
-  allocd((void *) src, n);
-  for (size_t i = 0; i < n; i++)
+  char *d = (char *) dest;
+  const char *s = (const char *) src;
+  size_t i = 0;
+  while (i < n)
   {
-    symbolic val = s[i];
-    cond_write(&d[i], val, 1);
+    allocd(d + i, 1);
+    allocd(s + i, 1);
+    d[i] = s[i];
+    i++;
   }
 
   return dest;

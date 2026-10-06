@@ -274,8 +274,7 @@ def run_test(func_name: str) -> None:
     )
     return
 
-#Checks if every result inside .json is correct/acceptable
-#result-types: "exact", "under-approximation", "over-approximation" or "bug"
+#Checks if every result inside .json is correct/acceptable -> result-types: "exact", "under-approximation", "over-approximation" or "bug"
 def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
     tests = json.loads(test_results)
     return len(tests) > 0 and all(t["result"] in accepted_results for t in tests.values())
@@ -300,7 +299,7 @@ def insert_parameters() -> tuple[str, str, set[str]]:
     return func_name, sum_prompt, accepted_results
 
 def pipeline(func_name: str, sum_prompt: str, rev_prompt: str, accepted_results: set[str]) -> None:
-    func_code = get_musl_code(func_name)
+    func_code = get_uclibc_code(func_name)
     #generating symbolic summary with LLM
     summary = gen_symbolic_summary(sum_prompt, func_name, func_code)
 

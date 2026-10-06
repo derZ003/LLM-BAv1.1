@@ -306,8 +306,10 @@ def exact_pipeline(func_name: str) -> None:
 
 #TODO: add overapprox pipeline
 
+#TODO: add underapprox pipeline
+
 if __name__ == "__main__":
-    #fetching glibc code
+    #fetching libc code
     #func_name = sys.argv[1]
     func_name = "memcpy"
     exact_pipeline(func_name)

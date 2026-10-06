@@ -1,3 +1,3 @@
 # Python
 
-- Always use the venv at `/home/flo/_Uni/BA/sbv-env`: run `/home/flo/_Uni/BA/sbv-env/bin/python` and `/home/flo/_Uni/BA/sbv-env/bin/pip`, never the system `python`/`pip`.
+- Always use the venv at `/home/flo/_Uni/BAv1.1/sbv-env`: run `/home/flo/_Uni/BAv1.1/sbv-env/bin/python` and `/home/flo/_Uni/BAv1.1/sbv-env/bin/pip`, never the system `python`/`pip`.

@@ -48,24 +48,18 @@ void *concrete_memcpy(void *dest, const void *src, size_t n)
   return dest;
 }
 
-static void sym_memcpy_loop(unsigned char *d, const unsigned char *s, size_t n)
-{
-  if (n == 0)
-    return;
-  symbolic val = *s;
-  cond_write(d, val, 1);
-  sym_memcpy_loop(d + 1, s + 1, n - 1);
-}
-
 void *memcpy(void * restrict dest, const void * restrict src, size_t n)
 {
-  if ((dest == 0) || (src == 0))
-  {
-    return dest;
-  }
+  unsigned char *d = (unsigned char *) dest;
+  const unsigned char *s = (const unsigned char *) src;
   allocd(dest, n);
-  allocd(src, n);
-  sym_memcpy_loop((unsigned char *) dest, (const unsigned char *) src, n);
+  allocd((void *) src, n);
+  for (size_t i = 0; i < n; i++)
+  {
+    symbolic val = s[i];
+    cond_write(&d[i], val, 1);
+  }
+
   return dest;
 }
 

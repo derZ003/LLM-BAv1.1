@@ -1,4 +1,5 @@
 from genericpath import exists
+import json
 import os
 import re
 import subprocess
@@ -14,7 +15,7 @@ from LibCCode import *
 
 load_dotenv()
 MORPHEUS_API_KEY = os.environ["MORPHEUS_API_KEY"]
-BASE_PATH = "~/_Uni/BA"
+BASE_PATH = "~/_Uni/BAv1.1"
 CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files"
 
 #Morpheus LLM API setup
@@ -132,19 +133,30 @@ SYMBOLIC_API_RULES = """
     - Over-approximation: return a fresh `sym_var(bits)`, possibly constrained by
     `assume` to a range that contains every real result.
 """
-#Prompt for generating symbolic summaries
-exact_sum_gen_prompt = PromptTemplate(
-    input_variables=["func_name", "libc_code"],
-    template = """#Task: You are a senior software engineer and need to write a summary of the follwoing C library function {func_name}
+
+#Prompt for generating exact symbolic summaries
+EXACT_SUM_GEN_STRING = """#Task: You are a senior software engineer and need to write an exact summary of the follwoing C library function {func_name}
     for symbolic testing, the summary must conform to the API guidelines.
     Your answer must not include any other text or explanation, only the C code block.
-""" + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
-    #Library function code:
-    ```c
-    {libc_code}
-    ```
-    """
-)
+"""
+#Prompt for generating under-approximate symbolic summaries
+UNDER_SUM_GEN_STRING = """#Task: You are a senior software engineer and need to write an under-approximate summary of the follwoing C library function {func_name}
+    for symbolic testing, the summary must conform to the API guidelines.
+    Your answer must not include any other text or explanation, only the C code block.
+"""
+#Prompt for generating over-approximate symbolic summaries
+OVER_SUM_GEN_STRING="""#Task: You are a senior software engineer and need to write an over-approximate summary of the follwoing C library function {func_name}
+    for symbolic testing, the summary must conform to the API guidelines.
+    Your answer must not include any other text or explanation, only the C code block.
+"""
+
+#Prompt for revision of symbolic summaries based on SummBoundVerify counterexamples
+REVISION_GEN_STRING = """#Task: You are a senior software engineer. The following symbolic summary of the C library function {func_name}
+    was validated against the library code and produced counterexamples: inputs on which the summary and the
+    library function behave differently. Revise the summary so that it fixes these counterexamples and conforms to the API guidelines.
+    Your answer must not include any other text or explanation, only the C code block.
+"""
+
 #Prompt for generating concrete testfile for SummboundVerify
 concrete_gen_prompt = PromptTemplate(
     input_variables=["func_name", "libc_code"],
@@ -165,30 +177,6 @@ concrete_gen_prompt = PromptTemplate(
     ```
 """
 )
-#Prompt for revision of symbolic summaries based on SummBoundVerify counterexamples
-revision_gen_prompt = PromptTemplate(
-    input_variables=["func_name", "libc_code", "summary", "counterexamples"],
-    template="""#Task: You are a senior software engineer. The following symbolic summary of the C library function {func_name}
-    was validated against the library code and produced counterexamples: inputs on which the summary and the
-    library function behave differently. Revise the summary so that it fixes these counterexamples and conforms to the API guidelines.
-    Your answer must not include any other text or explanation, only the C code block.
-""" + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
-    #Library function code:
-    ```c
-    {libc_code}
-    ```
-
-    #Current symbolic summary:
-    ```c
-    {summary}
-    ```
-
-    #Counterexamples (SummBoundVerify test results):
-    ```json
-    {counterexamples}
-    ```
-"""
-)
 
 #extract C code from LLM response
 def extract_c_code(text: str) -> str:
@@ -197,15 +185,43 @@ def extract_c_code(text: str) -> str:
         raise ValueError("no C code found in LLM response")
     return "\n".join(code).strip() + "\n"
 
-def gen_symbolic_summary(func_name:str, libc_code:str) -> str: 
-    chain_gensum = exact_sum_gen_prompt | llm
+def gen_symbolic_summary(sum_prompt: str, func_name:str, libc_code:str) -> str: 
+    gen_prompt = PromptTemplate(
+        input_variables=["func_name", "libc_code"],
+        template=sum_prompt + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
+        #Library function code:
+        ```c
+        {libc_code}
+        ```
+        """
+        )
+    chain_gensum = gen_prompt | llm
     response = chain_gensum.invoke({"func_name": func_name, "libc_code": libc_code})
     summary = extract_c_code(response.content)
     print("Generated symbolic summary:\n" + summary)
     return summary
 
-def gen_revision_summary(func_name:str, libc_code:str, summary:str, counterexamples:str) -> str:
-    chain_revision = revision_gen_prompt | llm
+def gen_revision_summary(rev_prompt: str, func_name:str, libc_code:str, summary:str, counterexamples:str) -> str:
+    gen_prompt = PromptTemplate(
+        input_variables=["func_name", "libc_code", "summary", "counterexamples"],
+        template=rev_prompt + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
+        #Library function code:
+        ```c
+        {libc_code}
+        ```
+
+        #Current symbolic summary:
+        ```c
+        {summary}
+        ```
+
+        #Counterexamples (SummBoundVerify test results):
+        ```json
+        {counterexamples}
+        ```
+        """
+    )
+    chain_revision = gen_prompt | llm
     response = chain_revision.invoke({"func_name": func_name, "libc_code": libc_code, "summary": summary, "counterexamples": counterexamples})
     summary = extract_c_code(response.content)
     print("Generated revised-symbolic summary:\n" + summary)
@@ -245,7 +261,9 @@ def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str) 
     print("stderr: \n" + testgen.stderr)
     return
 
-def run_test() -> None:
+def run_test(func_name: str) -> None:
+    #remove old results so a failed run is not mistaken for a passed one
+    (CUR_DIR / f"{func_name}_validation.test_result.json").unlink(missing_ok=True)
     #executing Testfile
     subprocess.run(
         [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
@@ -256,10 +274,35 @@ def run_test() -> None:
     )
     return
 
-def exact_pipeline(func_name: str) -> None:
+#Checks if every result inside .json is correct/acceptable
+#result-types: "exact", "under-approximation", "over-approximation" or "bug"
+def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
+    tests = json.loads(test_results)
+    return len(tests) > 0 and all(t["result"] in accepted_results for t in tests.values())
+
+def insert_parameters() -> tuple[str, str, set[str]]:
+    #func_name = sys.argv[1]
+    #approx_mode = sys.argv[2]
+    func_name = "memcpy"
+    approx_mode = "exact"
+    sum_prompt = {
+        (approx_mode == "exact"): EXACT_SUM_GEN_STRING,
+        (approx_mode == "over"): OVER_SUM_GEN_STRING,
+        (approx_mode == "under"): UNDER_SUM_GEN_STRING,
+    }[True]
+    #exact also accepted for over- and under-approximation
+    accepted_results = {
+        (approx_mode == "exact"): {"exact"},
+        (approx_mode == "over"): {"over-approximation", "exact"},
+        (approx_mode == "under"): {"under-approximation", "exact"},
+    }[True]
+    print(f"Generating symbolic summary for {func_name} with {approx_mode}-approximation...")
+    return func_name, sum_prompt, accepted_results
+
+def pipeline(func_name: str, sum_prompt: str, rev_prompt: str, accepted_results: set[str]) -> None:
     func_code = get_musl_code(func_name)
     #generating symbolic summary with LLM
-    summary = gen_symbolic_summary(func_name, func_code)
+    summary = gen_symbolic_summary(sum_prompt, func_name, func_code)
 
     #generate concrete.c (header-free) for sbv call
     concrete_code = gen_concrete_code(func_name, func_code)
@@ -274,21 +317,24 @@ def exact_pipeline(func_name: str) -> None:
     summ_path = CUR_DIR / "cur_summary.c"
 
     gen_test(concrete_path, summ_path, test_path, func_name)
-    run_test()
+    run_test(func_name)
 
     test_results_path = CUR_DIR / f"{func_name}_validation.test_result.json"
-    #skipp regeneration of symbolic summary if counterexamples is empty
+    #skip regeneration of symbolic summary if the result is accepted for this approximation mode
     if test_results_path.exists():
         test_results = test_results_path.read_text()
         print("Test results:\n" + test_results)
         i = 0
-        while '"counterexamples": {}' not in test_results and i < 3:
-            print("counterexamples found, regenerating symbolic summary...")
-            summary = gen_revision_summary(func_name, func_code, summary, test_results)
+        while not results_accepted(test_results, accepted_results) and i < 3:
+            print("result not accepted, regenerating symbolic summary...")
+            summary = gen_revision_summary(rev_prompt, func_name, func_code, summary, test_results)
             write_summary_cur_Files(summary)
             #retesting revised summary
             gen_test(concrete_path, summ_path, test_path, func_name)
-            run_test()
+            run_test(func_name)
+            if not test_results_path.exists():
+                print("No test results found after revision, stopping.")
+                break
             test_results = test_results_path.read_text()
             print("Updated test results:\n" + test_results)
             i += 1
@@ -304,14 +350,8 @@ def exact_pipeline(func_name: str) -> None:
         print("No test results found and test failed, try again ;)")
     return
 
-#TODO: add overapprox pipeline
-
-#TODO: add underapprox pipeline
-
 if __name__ == "__main__":
-    #fetching libc code
-    #func_name = sys.argv[1]
-    func_name = "memcpy"
-    exact_pipeline(func_name)
+    func_name, sum_prompt, accepted_results = insert_parameters()
+    pipeline(func_name, sum_prompt, REVISION_GEN_STRING, accepted_results)
 
 

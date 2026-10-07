@@ -5,15 +5,15 @@
 #define FALSE 0
 #endif
 void *memcpy(void *dest, const void *src, size_t n) {
-    char *d = (char *)dest;
-    const char *s = (const char *)src;
-    size_t i = 0;
+    unsigned char *d = (unsigned char *)dest;
+    const unsigned char *s = (const unsigned char *)src;
 
-    while (i < n) {
-        allocd(d + i, 1);
-        allocd(s + i, 1);
-        d[i] = s[i];
-        i++;
+    allocd(d, n);
+    allocd(s, n);
+
+    for (size_t i = 0; i < n; i++) {
+        symbolic val = s[i];
+        cond_write(&d[i], val, TRUE);
     }
 
     return dest;

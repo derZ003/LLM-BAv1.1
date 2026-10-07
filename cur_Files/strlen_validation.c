@@ -25,68 +25,43 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
-void allocd(void* ptr, size_t size) {return;}
-void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 
 #define POINTER_SIZE 5
 #define FUEL 5
 #define ARRAY_SIZE_1 5
 #define MAX_NUM_1 5
 
-void *concrete_memcpy(void *s1, const void *s2, size_t n)
+size_t concrete_strlen(const char *s)
 {
-  register char *r1 = s1;
-  register const char *r2 = s2;
-  while (n)
-  {
-    *(r1++) = *(r2++);
-    --n;
-  }
+  register const char *p;
+  for (p = s; *p; p++)
+    ;
 
-  return s1;
+  return p - s;
 }
 
-void *memcpy(void *dest, const void *src, size_t n)
+size_t strlen(const char *s)
 {
-  unsigned char *d = (unsigned char *) dest;
-  const unsigned char *s = (const unsigned char *) src;
-  allocd(d, n);
-  allocd(s, n);
-  for (size_t i = 0; i < n; i++)
-  {
-    symbolic val = s[i];
-    cond_write(&d[i], val, 1);
-  }
-
-  return dest;
+  symbolic len = sym_var_named("strlen_ret", 32);
+  return (size_t) len;
 }
 
 void test_1()
 {
-  char dest[ARRAY_SIZE_1];
-  for (int dest_idx_1 = 0; dest_idx_1 < ARRAY_SIZE_1; dest_idx_1++)
+  char s[ARRAY_SIZE_1];
+  for (int s_idx_1 = 0; s_idx_1 < ARRAY_SIZE_1; s_idx_1++)
   {
-    dest[dest_idx_1] = sym_var_array("dest", dest_idx_1, sizeof(char) * 8);
+    s[s_idx_1] = sym_var_array("s", s_idx_1, sizeof(char) * 8);
   }
 
-  dest[ARRAY_SIZE_1 - 1] = '\0';
-  char src[ARRAY_SIZE_1];
-  for (int src_idx_1 = 0; src_idx_1 < ARRAY_SIZE_1; src_idx_1++)
-  {
-    src[src_idx_1] = sym_var_array("src", src_idx_1, sizeof(char) * 8);
-  }
-
-  src[ARRAY_SIZE_1 - 1] = '\0';
-  size_t n = sym_var_named("n", sizeof(size_t) * 8);
-  size_t max_1 = MAX_NUM_1;
-  assume(_ULE_(n, max_1));
+  s[ARRAY_SIZE_1 - 1] = '\0';
   state_t initial_state = save_current_state();
-  void * ret1 = concrete_memcpy(dest, src, n);
-  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(void *) * 8);
+  size_t ret1 = concrete_strlen(s);
+  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(size_t) * 8);
   store_cnstr("cnctr_test1", cnstr1);
   halt_all(initial_state);
-  void * ret2 = memcpy(dest, src, n);
-  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(void *) * 8);
+  size_t ret2 = strlen(s);
+  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(size_t) * 8);
   store_cnstr("summ_test1", cnstr2);
   halt_all(NULL);
   result_t result = check_implications("cnctr_test1", "summ_test1");

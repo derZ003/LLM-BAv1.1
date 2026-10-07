@@ -25,8 +25,13 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
+cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
+cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
+cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
 void allocd(void* ptr, size_t size) {return;}
-void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
+int is_certain(cnstr_t cnstr){return 0;}
+void pop_pc(){return;}
+void push_pc(){return;}
 
 #define POINTER_SIZE 5
 #define FUEL 5
@@ -46,23 +51,39 @@ void *concrete_memcpy(void *s1, const void *s2, size_t n)
   return s1;
 }
 
+static void *memcpy_recursive(char *dest, const char *src, size_t n)
+{
+  cnstr_t n_zero = _EQ_(n, 0);
+  if (is_certain(n_zero))
+  {
+    return (void *) dest;
+  }
+  if (is_certain(_NOT_(n_zero)))
+  {
+    allocd(dest, 1);
+    allocd((void *) src, 1);
+    *dest = *src;
+    return memcpy_recursive(dest + 1, src + 1, n - 1);
+  }
+  push_pc();
+  assume(n_zero);
+  void *res_zero = (void *) dest;
+  pop_pc();
+  push_pc();
+  assume(_NOT_(n_zero));
+  allocd(dest, 1);
+  allocd((void *) src, 1);
+  *dest = *src;
+  void *res_step = memcpy_recursive(dest + 1, src + 1, n - 1);
+  pop_pc();
+  return (void *) _ITE_VAR_(n_zero, (symbolic) res_zero, (symbolic) res_step);
+}
+
 void *memcpy(void *dest, const void *src, size_t n)
 {
-  char *d = (char *) dest;
-  const char *s = (const char *) src;
-  if (n == 0)
-  {
-    return dest;
-  }
-  allocd(d, n);
-  allocd(s, n);
-  for (size_t i = 0; i < n; i++)
-  {
-    symbolic val = s[i];
-    cond_write(d + i, val, 1);
-  }
-
-  return dest;
+  void *original_dest = dest;
+  memcpy_recursive((char *) dest, (const char *) src, n);
+  return original_dest;
 }
 
 void test_1()

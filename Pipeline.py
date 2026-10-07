@@ -11,15 +11,26 @@ from SummaryGeneration import gen_symbolic_summary, gen_revision_summary
 BASE_PATH = "~/_Uni/BAv1.1"
 CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files"
 TEST_TIMEOUT = 120
-#fallback "counterexample" for the revision prompt if the summary does not terminate
-TIMEOUT_MSG = (f"The symbolic execution of the summary did not terminate within {TEST_TIMEOUT} seconds, "
-               "so no counterexamples are available. Check every recursion and loop: on each path it must reach "
-               "a base case whose condition becomes certain via assume (see 'Recursion bounded by a length' "
-               "and 'Termination check').")
+TIMEOUT_MSG = (f"The symbolic execution of the summary did not terminate within {TEST_TIMEOUT} seconds")
+#accepted result types per approximation mode, exact also accepted for over- and under-approximation
+ACCEPTED_RESULTS = {
+    "exact": {"exact"},
+    "over": {"over-approximation", "exact"},
+    "under": {"under-approximation", "exact"},
+}
 
-def move_cur_Files(func_name: str) -> None:
-    target_dir = CUR_DIR / f"{func_name}-tests"
-    target_dir.mkdir(exist_ok=True)
+#categrorizes test results
+def result_category(test_results: str | None) -> str:
+    if test_results is None:
+        return "bug"
+    for category, accepted_results in ACCEPTED_RESULTS.items():
+        if results_accepted(test_results, accepted_results):
+            return category
+    return "bug"
+#sorts and moves cur_Files
+def move_cur_Files(func_name: str, test_results: str | None) -> None:
+    target_dir = CUR_DIR / result_category(test_results) / f"{func_name}-tests"
+    target_dir.mkdir(parents=True, exist_ok=True)
     file_names = ["cur_concrete.c", "cur_summary.c", f"{func_name}_validation.c",
                 f"{func_name}_validation.test", f"{func_name}_validation.test_result.json"]
     for name in file_names:
@@ -54,10 +65,9 @@ def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str) 
     print("stderr: \n" + testgen.stderr)
     return
 
-#returns the test results, TIMEOUT_MSG if the summary did not terminate, or None if no results exist
 def run_test(func_name: str) -> str | None:
     test_results_path = CUR_DIR / f"{func_name}_validation.test_result.json"
-    #remove old results so a failed run is not mistaken for a passed one
+    #remove old results
     test_results_path.unlink(missing_ok=True)
     #executing Testfile
     try:
@@ -89,14 +99,9 @@ def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
 def insert_parameters() -> tuple[str, str, set[str]]:
     #func_name = sys.argv[1]
     #approx_mode = sys.argv[2]
-    func_name = "strchr"
+    func_name = "strcpy"
     approx_mode = "exact"
-    #exact also accepted for over- and under-approximation
-    accepted_results = {
-        (approx_mode == "exact"): {"exact"},
-        (approx_mode == "over"): {"over-approximation", "exact"},
-        (approx_mode == "under"): {"under-approximation", "exact"},
-    }[True]
+    accepted_results = ACCEPTED_RESULTS[approx_mode]
     print(f"Generating symbolic summary for {func_name} with {approx_mode}-approximation...")
     return func_name, approx_mode, accepted_results
 
@@ -146,7 +151,7 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
         print("Final test results:\n" + test_results)
     else:
         print("No test results found and test failed, try again ;)")
-    move_cur_Files(func_name)
+    move_cur_Files(func_name, test_results)
     print("Finished")
     return
 

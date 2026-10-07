@@ -28,6 +28,7 @@ void store_cnstr(char* name, cnstr_t constraint) {return;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
 cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
+void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
 void pop_pc(){return;}
 void push_pc(){return;}
@@ -35,64 +36,72 @@ void push_pc(){return;}
 #define POINTER_SIZE 5
 #define FUEL 5
 #define ARRAY_SIZE_1 5
+#define MAX_NUM_1 5
 
-size_t concrete_strlen(const char *s)
+char *concrete_strcpy(char *s1, const char *s2)
 {
-  const char *a = s;
-  for (; *s; s++)
+  register char *s = s1;
+  while ((*(s++) = *(s2++)) != 0)
     ;
 
-  return s - a;
+  return s1;
 }
 
-static size_t strlen_recursive(const char *s, size_t offset)
+static char *strcpy_rec(char *s1, const char *s2)
 {
-  symbolic current_char = *((const char *) s);
-  cnstr_t is_null = _EQ_(current_char, 0);
+  cnstr_t is_null = _EQ_(*s2, '\0');
   if (is_certain(is_null))
   {
-    return offset;
+    *s1 = *s2;
+    return s1;
   }
-  else
-    if (is_certain(_NOT_(is_null)))
+  if (is_certain(_NOT_(is_null)))
   {
-    return strlen_recursive(s + 1, offset + 1);
+    *s1 = *s2;
+    return strcpy_rec(s1 + 1, s2 + 1);
   }
-  else
-  {
-    push_pc();
-    assume(is_null);
-    size_t len_null = offset;
-    pop_pc();
-    push_pc();
-    assume(_NOT_(is_null));
-    size_t len_not_null = strlen_recursive(s + 1, offset + 1);
-    pop_pc();
-    return (size_t) _ITE_VAR_(is_null, (symbolic) len_null, (symbolic) len_not_null);
-  }
+  push_pc();
+  assume(is_null);
+  *s1 = *s2;
+  char *res_null = s1;
+  pop_pc();
+  push_pc();
+  assume(_NOT_(is_null));
+  *s1 = *s2;
+  char *res_not_null = strcpy_rec(s1 + 1, s2 + 1);
+  pop_pc();
+  cond_write(s1, *s2, 1);
+  return _ITE_VAR_(is_null, res_null, res_not_null);
 }
 
-size_t strlen(const char *s)
+char *strcpy(char *dest, const char *src)
 {
-  return strlen_recursive(s, 0);
+  return strcpy_rec(dest, src);
 }
 
 void test_1()
 {
-  char s[ARRAY_SIZE_1];
-  for (int s_idx_1 = 0; s_idx_1 < ARRAY_SIZE_1; s_idx_1++)
+  char dest[ARRAY_SIZE_1];
+  for (int dest_idx_1 = 0; dest_idx_1 < ARRAY_SIZE_1; dest_idx_1++)
   {
-    s[s_idx_1] = sym_var_array("s", s_idx_1, sizeof(char) * 8);
+    dest[dest_idx_1] = sym_var_array("dest", dest_idx_1, sizeof(char) * 8);
   }
 
-  s[ARRAY_SIZE_1 - 1] = '\0';
+  dest[ARRAY_SIZE_1 - 1] = '\0';
+  char src[ARRAY_SIZE_1];
+  for (int src_idx_1 = 0; src_idx_1 < ARRAY_SIZE_1; src_idx_1++)
+  {
+    src[src_idx_1] = sym_var_array("src", src_idx_1, sizeof(char) * 8);
+  }
+
+  src[ARRAY_SIZE_1 - 1] = '\0';
   state_t initial_state = save_current_state();
-  size_t ret1 = concrete_strlen(s);
-  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(size_t) * 8);
+  char * ret1 = concrete_strcpy(dest, src);
+  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(char *) * 8);
   store_cnstr("cnctr_test1", cnstr1);
   halt_all(initial_state);
-  size_t ret2 = strlen(s);
-  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(size_t) * 8);
+  char * ret2 = strcpy(dest, src);
+  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(char *) * 8);
   store_cnstr("summ_test1", cnstr2);
   halt_all(NULL);
   result_t result = check_implications("cnctr_test1", "summ_test1");

@@ -140,6 +140,15 @@ SYMBOLIC_API_RULES = """
     `assume(_NOT_(_EQ_(*s, '\\0')))`, never past a possible terminator.
     The inputs are bounded, so this terminates.
 
+    **Return value.** The summary must return exactly what the library code
+    returns; check its `return` statement. The recursion advances its pointer
+    arguments, so the pointer reached at the base case is NOT the original
+    argument. If the library returns an unchanged parameter (e.g. `dest`/`s1`
+    in strcpy, strcat, memcpy, memset), let the recursive helper only do the
+    work (return `void`) and return the saved original parameter from
+    {func_name} itself. Only merge results with `_ITE_VAR_` when the return
+    value really depends on where the recursion stops (e.g. strlen, strchr).
+
     **Recursion bounded by a length.** A size parameter (`n`, `len`, `count`, ...)
     is usually symbolic. `is_certain(_EQ_(n, 0))` is then never true, so a
     recursion that only stops on it never terminates. Treat `_EQ_(n, 0)` like
@@ -206,6 +215,10 @@ GENERAL_REV_GEN_STRING = """
     - "under-approximation": inputs where the summary returns "ret",
     but the library function never does -> the summary has a wrong behavior.
     - "Not in model": the byte is irrelevant for this counterexample.
+    - For pointer return types, "ret" is an address. If the two counterexamples
+    have "ret" values that differ by a small offset, the summary returns a
+    pointer advanced by the recursion instead of the pointer the library
+    returns -> compare with the library's `return` statement.
     Trace the summary on these concrete inputs, find the branch that produces the
     wrong result, and fix that branch. Usually it is a missing case split.
 

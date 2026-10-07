@@ -127,6 +127,22 @@ SYMBOLIC_API_RULES = """
     one branch only, or concretize with `v = maximize(x); assume(_EQ_(x, v));`.
     - Over-approximation: return a fresh `sym_var(bits)`, possibly constrained by
     `assume` to a range that contains every real result.
+
+    **Every symbolic condition has three cases.** For each condition `c` that
+    depends on a symbolic value, handle: certainly true (`is_certain(c)`),
+    certainly false (`is_certain(_NOT_(c))`), and undecided (case split).
+    A two-way `if (is_certain(c)) A else B` is wrong in an exact summary: when `c`
+    is only possible, it silently executes B for inputs where A is correct.
+    This applies to nested conditions too: after `assume(c1)`, a second
+    condition `c2` is usually still undecided and needs its own case split.
+
+    **Recursion over a string.** At each byte, the end-of-string condition
+    `_EQ_(*s, '\\0')` is a symbolic condition like any other. Use the case split:
+    return the terminating result if `*s` is `'\\0'`, recurse on `s + 1` otherwise,
+    and merge both with `_ITE_VAR_`. Only recurse inside
+    `assume(_NOT_(_EQ_(*s, '\\0')))`, never past a possible terminator.
+    The inputs are bounded, so this terminates.
+
 """
 
 #Prompt for generating exact symbolic summaries
@@ -166,6 +182,17 @@ UNDER_REV_GEN_STRING = """#Task: You are a senior software engineer. The followi
     Your answer must not include any other text or explanation, only the C code block.
 """
 
+GENERAL_REV_GEN_STRING = """
+    #How to read the counterexamples:
+    - "over-approximation": inputs where the library function returns "ret",
+    but the summary cannot return it -> the summary is missing a behavior.
+    - "under-approximation": inputs where the summary returns "ret",
+    but the library function never does -> the summary has a wrong behavior.
+    - "Not in model": the byte is irrelevant for this counterexample.
+    Trace the summary on these concrete inputs, find the branch that produces the
+    wrong result, and fix that branch. Usually it is a missing case split.
+
+"""
 def gen_symbolic_summary(approx_mode: str, func_name:str, libc_code:str) -> str: 
     sum_prompt = {
             (approx_mode == "exact"): EXACT_SUM_GEN_STRING,
@@ -195,7 +222,7 @@ def gen_revision_summary(approx_mode: str, func_name:str, libc_code:str, summary
         }[True]
     gen_prompt = PromptTemplate(
         input_variables=["func_name", "libc_code", "summary", "counterexamples"],
-        template=rev_prompt + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
+        template=rev_prompt + GENERAL_REV_GEN_STRING + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
         #Library function code:
         ```c
         {libc_code}

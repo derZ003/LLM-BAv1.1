@@ -1,15 +1,13 @@
-void *concrete_memcpy(void *dest, const void *src, size_t n)
+void *concrete_memcpy(void *s1, const void *s2, size_t n)
 {
-    unsigned char *d = (unsigned char *)dest;
-    const unsigned char *s = (const unsigned char *)src;
+  register char *r1 = s1;
+  register const char *r2 = s2;
+  while (n)
+  {
+    *(r1++) = *(r2++);
+    --n;
+  }
 
-    while (n > 0)
-    {
-        *d = *s;
-        d++;
-        s++;
-        n--;
-    }
-
-    return dest;
+  return s1;
 }
+

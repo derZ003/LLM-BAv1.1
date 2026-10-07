@@ -4,16 +4,16 @@
 #ifndef FALSE
 #define FALSE 0
 #endif
-void *memcpy(void *restrict dest, const void *restrict src, size_t n) {
+void *memcpy(void *dest, const void *src, size_t n) {
     char *d = (char *)dest;
     const char *s = (const char *)src;
-    
-    allocd(dest, n);
-    allocd(src, n);
+    size_t i = 0;
 
-    for (size_t i = 0; i < n; i++) {
-        symbolic val = s[i];
-        cond_write(d + i, val, TRUE);
+    while (i < n) {
+        allocd(d + i, 1);
+        allocd(s + i, 1);
+        d[i] = s[i];
+        i++;
     }
 
     return dest;

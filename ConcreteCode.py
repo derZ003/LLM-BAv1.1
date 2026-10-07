@@ -87,11 +87,14 @@ class Renamer(c_ast.NodeVisitor):
             node.name = "concrete_" + node.name
 
 def preprocess_uclibc(func_name: str) -> str:
-    code = subprocess.run(
-        ["gcc", "-E", "-P", "-undef", "-nostdinc", "-I", str(STUB_DIR / "include"),
-        "-include", str(STUB_DIR / "uclibc_stub.h"), get_uclibc_codepath(func_name)],
-        capture_output=True, text=True, check=True
-    ).stdout
+    try:
+        code = subprocess.run(
+            ["gcc", "-E", "-P", "-undef", "-nostdinc", "-I", str(STUB_DIR / "include"),
+            "-include", str(STUB_DIR / "uclibc_stub.h"), get_uclibc_codepath(func_name)],
+            capture_output=True, text=True, check=True
+        ).stdout
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Preprocessing failed for {func_name}: {e.stderr}") from e
 
     #strip typedefs and string_uchar_t
     code = code.replace("typedef unsigned char __string_uchar_t;\n", "")

@@ -4,12 +4,23 @@ import sys
 
 from pathlib import Path
 
-from LibCCode import *
+from LibCCode import get_uclibc_code
 from ConcreteCode import gen_concrete_code, get_concrete_code
 from SummaryGeneration import gen_symbolic_summary, gen_revision_summary
 
 BASE_PATH = "~/_Uni/BAv1.1"
 CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files"
+
+def move_cur_Files(func_name: str) -> None:
+    target_dir = CUR_DIR / f"{func_name}-tests"
+    target_dir.mkdir(exist_ok=True)
+    file_names = ["cur_concrete.c", "cur_summary.c", f"{func_name}_validation.c",
+                f"{func_name}_validation.test", f"{func_name}_validation.test_result.json"]
+    for name in file_names:
+        path = CUR_DIR / name
+        if path.exists():
+            path.replace(target_dir / name)
+    return
 
 def write_concrete_cur_Files(concrete_code:str) -> None:
     concrete_path = CUR_DIR / "cur_concrete.c"
@@ -58,7 +69,7 @@ def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
 def insert_parameters() -> tuple[str, str, set[str]]:
     #func_name = sys.argv[1]
     #approx_mode = sys.argv[2]
-    func_name = "memcpy"
+    func_name = "strncmp"
     approx_mode = "exact"
     #exact also accepted for over- and under-approximation
     accepted_results = {
@@ -71,11 +82,12 @@ def insert_parameters() -> tuple[str, str, set[str]]:
 
 def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> None:
     func_code = get_uclibc_code(func_name)
-    #generating symbolic summary with LLM
-    summary = gen_symbolic_summary(approx_mode, func_name, func_code)
 
     #generate concrete.c (header-free) for sbv call
     concrete_code = get_concrete_code(func_name)
+
+    #generating symbolic summary with LLM
+    summary = gen_symbolic_summary(approx_mode, func_name, func_code)
 
     #write concrete and summary to cur_Files folder
     write_concrete_cur_Files(concrete_code)
@@ -99,6 +111,7 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
             print("result not accepted, regenerating symbolic summary...")
             summary = gen_revision_summary(approx_mode, func_name, func_code, summary, test_results)
             write_summary_cur_Files(summary)
+            print("Revision:\n" + summary)
             #retesting revised summary
             gen_test(concrete_path, summ_path, test_path, func_name)
             run_test(func_name)
@@ -118,6 +131,8 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
         print("Final test results:\n" + test_results)
     else:
         print("No test results found and test failed, try again ;)")
+    move_cur_Files(func_name)
+    print("Finished")
     return
 
 if __name__ == "__main__":

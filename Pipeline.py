@@ -10,6 +10,12 @@ from SummaryGeneration import gen_symbolic_summary, gen_revision_summary
 
 BASE_PATH = "~/_Uni/BAv1.1"
 CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files"
+TEST_TIMEOUT = 120
+#fallback "counterexample" for the revision prompt if the summary does not terminate
+TIMEOUT_MSG = (f"The symbolic execution of the summary did not terminate within {TEST_TIMEOUT} seconds, "
+               "so no counterexamples are available. Check every recursion and loop: on each path it must reach "
+               "a base case whose condition becomes certain via assume (see 'Recursion bounded by a length' "
+               "and 'Termination check').")
 
 def move_cur_Files(func_name: str) -> None:
     target_dir = CUR_DIR / f"{func_name}-tests"
@@ -48,28 +54,42 @@ def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str) 
     print("stderr: \n" + testgen.stderr)
     return
 
-def run_test(func_name: str) -> None:
+#returns the test results, TIMEOUT_MSG if the summary did not terminate, or None if no results exist
+def run_test(func_name: str) -> str | None:
+    test_results_path = CUR_DIR / f"{func_name}_validation.test_result.json"
     #remove old results so a failed run is not mistaken for a passed one
-    (CUR_DIR / f"{func_name}_validation.test_result.json").unlink(missing_ok=True)
+    test_results_path.unlink(missing_ok=True)
     #executing Testfile
-    subprocess.run(
-        [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
-        str(CUR_DIR / f"{func_name}_validation.test"), "--results", 
-        str(CUR_DIR), "-ascii"],
-        capture_output=True,
-        text=True
-    )
-    return
+    try:
+        testrun = subprocess.run(
+            [str(Path(sys.executable).parent / "summbv"), "-run", "--binary", 
+            str(CUR_DIR / f"{func_name}_validation.test"), "--results", 
+            str(CUR_DIR), "-ascii", "-timeout", str(TEST_TIMEOUT)],
+            capture_output=True,
+            text=True,
+            timeout=TEST_TIMEOUT + 30
+        )
+        timed_out = "TimeoutError" in testrun.stdout
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    if test_results_path.exists():
+        return test_results_path.read_text()
+    if timed_out:
+        print("Testing Timeout.")
+        return TIMEOUT_MSG
+    return None
 
 #Checks every result inside .json is correct/acceptable -> result-types: "exact", "under-approximation", "over-approximation" or "bug"
 def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
+    if test_results == TIMEOUT_MSG:
+        return False
     tests = json.loads(test_results)
     return len(tests) > 0 and all(t["result"] in accepted_results for t in tests.values())
 
 def insert_parameters() -> tuple[str, str, set[str]]:
     #func_name = sys.argv[1]
     #approx_mode = sys.argv[2]
-    func_name = "strncmp"
+    func_name = "strchr"
     approx_mode = "exact"
     #exact also accepted for over- and under-approximation
     accepted_results = {
@@ -99,26 +119,22 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
     summ_path = CUR_DIR / "cur_summary.c"
 
     gen_test(concrete_path, summ_path, test_path, func_name)
-    run_test(func_name)
+    test_results = run_test(func_name)
 
-    test_results_path = CUR_DIR / f"{func_name}_validation.test_result.json"
     #skip regeneration of symbolic summary if the result is accepted for this approximation mode
-    if test_results_path.exists():
-        test_results = test_results_path.read_text()
+    if test_results is not None:
         print("Test results:\n" + test_results)
         i = 0
         while not results_accepted(test_results, accepted_results) and i < 3:
             print("result not accepted, regenerating symbolic summary...")
             summary = gen_revision_summary(approx_mode, func_name, func_code, summary, test_results)
             write_summary_cur_Files(summary)
-            print("Revision:\n" + summary)
             #retesting revised summary
             gen_test(concrete_path, summ_path, test_path, func_name)
-            run_test(func_name)
-            if not test_results_path.exists():
+            test_results = run_test(func_name)
+            if test_results is None:
                 print("No test results found after revision, stopping.")
                 break
-            test_results = test_results_path.read_text()
             print("Updated test results:\n" + test_results)
             i += 1
     else: 
@@ -126,8 +142,7 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
     #return summary and counterexamples
     write_summary_cur_Files(summary)
     print("Final symbolic summary:\n" + summary)
-    if test_results_path.exists():
-        test_results = test_results_path.read_text()
+    if test_results is not None:
         print("Final test results:\n" + test_results)
     else:
         print("No test results found and test failed, try again ;)")

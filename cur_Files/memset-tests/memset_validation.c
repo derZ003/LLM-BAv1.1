@@ -25,71 +25,84 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
+cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
+cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
+cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
 void allocd(void* ptr, size_t size) {return;}
 void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
+int is_certain(cnstr_t cnstr){return 0;}
+void pop_pc(){return;}
+void push_pc(){return;}
 
 #define POINTER_SIZE 5
 #define FUEL 5
 #define ARRAY_SIZE_1 5
 #define MAX_NUM_1 5
 
-void *concrete_memcpy(void *s1, const void *s2, size_t n)
+void *concrete_memset(void *s, int c, size_t n)
 {
-  register char *r1 = s1;
-  register const char *r2 = s2;
+  register unsigned char *p = (unsigned char *) s;
   while (n)
   {
-    *(r1++) = *(r2++);
+    *(p++) = (unsigned char) c;
     --n;
   }
 
-  return s1;
+  return s;
 }
 
-void *memcpy(void *dest, const void *src, size_t n)
+static void *memset_recursive(void *s, int c, size_t n)
 {
-  char *d = (char *) dest;
-  const char *s = (const char *) src;
-  if (n == 0)
+  cnstr_t n_zero = _EQ_(n, 0);
+  if (is_certain(n_zero))
   {
-    return dest;
+    return s;
   }
-  allocd(d, n);
-  allocd(s, n);
-  for (size_t i = 0; i < n; i++)
+  if (is_certain(_NOT_(n_zero)))
   {
-    symbolic val = s[i];
-    cond_write(d + i, val, 1);
+    allocd(s, 1);
+    cond_write(s, (symbolic) ((unsigned char) c), 1);
+    return memset_recursive(((char *) s) + 1, c, n - 1);
   }
+  push_pc();
+  assume(n_zero);
+  void *res_zero = s;
+  pop_pc();
+  push_pc();
+  assume(_NOT_(n_zero));
+  allocd(s, 1);
+  cond_write(s, (symbolic) ((unsigned char) c), 1);
+  void *res_step = memset_recursive(((char *) s) + 1, c, n - 1);
+  pop_pc();
+  return _ITE_VAR_(n_zero, (symbolic) res_zero, (symbolic) res_zero);
+}
 
-  return dest;
+void *memset(void *s, int c, size_t n)
+{
+  return memset_recursive(s, c, n);
 }
 
 void test_1()
 {
-  char dest[ARRAY_SIZE_1];
-  for (int dest_idx_1 = 0; dest_idx_1 < ARRAY_SIZE_1; dest_idx_1++)
+  char s[ARRAY_SIZE_1];
+  for (int s_idx_1 = 0; s_idx_1 < ARRAY_SIZE_1; s_idx_1++)
   {
-    dest[dest_idx_1] = sym_var_array("dest", dest_idx_1, sizeof(char) * 8);
+    s[s_idx_1] = sym_var_array("s", s_idx_1, sizeof(char) * 8);
   }
 
-  dest[ARRAY_SIZE_1 - 1] = '\0';
-  char src[ARRAY_SIZE_1];
-  for (int src_idx_1 = 0; src_idx_1 < ARRAY_SIZE_1; src_idx_1++)
-  {
-    src[src_idx_1] = sym_var_array("src", src_idx_1, sizeof(char) * 8);
-  }
-
-  src[ARRAY_SIZE_1 - 1] = '\0';
+  s[ARRAY_SIZE_1 - 1] = '\0';
+  int c = sym_var_named("c", sizeof(int) * 8);
+  int max_1 = MAX_NUM_1;
+  assume(_ULE_(c, max_1));
   size_t n = sym_var_named("n", sizeof(size_t) * 8);
-  size_t max_1 = MAX_NUM_1;
-  assume(_ULE_(n, max_1));
+  size_t max_2 = MAX_NUM_1;
+  assume(_ULE_(n, max_2));
   state_t initial_state = save_current_state();
-  void * ret1 = concrete_memcpy(dest, src, n);
+  void * ret1 = concrete_memset(s, c, n);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(void *) * 8);
   store_cnstr("cnctr_test1", cnstr1);
   halt_all(initial_state);
-  void * ret2 = memcpy(dest, src, n);
+  void * ret2 = memset(s, c, n);
   cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(void *) * 8);
   store_cnstr("summ_test1", cnstr2);
   halt_all(NULL);

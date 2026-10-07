@@ -7,13 +7,17 @@
 void *memcpy(void *dest, const void *src, size_t n) {
     char *d = (char *)dest;
     const char *s = (const char *)src;
-    size_t i = 0;
 
-    while (i < n) {
-        allocd(d + i, 1);
-        allocd(s + i, 1);
-        d[i] = s[i];
-        i++;
+    if (n == 0) {
+        return dest;
+    }
+
+    allocd(d, n);
+    allocd(s, n);
+
+    for (size_t i = 0; i < n; i++) {
+        symbolic val = s[i];
+        cond_write(d + i, val, TRUE);
     }
 
     return dest;

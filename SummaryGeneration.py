@@ -47,7 +47,7 @@ SYMBOLIC_API_RULES = """
     and query them with `is_certain` / `is_sat`.
     - Sizes of symbolic variables are given in bits (char = 8, int = 32, 32-bit
     target).
-
+    
     ### Types
     `symbolic` (a symbolic value), `cnstr_t` (constraint handle), `list_t` (a
     symbolic byte list), `size_t` = `unsigned int`, `ssize_t` = `int`.
@@ -104,18 +104,15 @@ SYMBOLIC_API_RULES = """
     **Case split (exact).** Checks `cond` without forking and merges both branches
     into one path:
     ```c
-    int r;
+    symbolic r;
     if (is_certain(cond))            {{ r = A; }}
     else if (is_certain(_NOT_(cond))) {{ r = B; }}
     else {{
-    push_pc(); assume(cond);        r = A; int a = r; pop_pc();
-    push_pc(); assume(_NOT_(cond)); r = B; int b = r; pop_pc();
+    push_pc(); assume(cond);        symbolic a = A; pop_pc();
+    push_pc(); assume(_NOT_(cond)); symbolic b = B; pop_pc();
     r = _ITE_VAR_(cond, a, b);
     }}
     ```
-
-    **Recursion over a string.** Recurse on `s + 1` until
-    `is_certain(_EQ_(*s, '\0'))`. The inputs are bounded, so this terminates.
 
     **Unconditional write.** Use a plain assignment `*p = v;` or
     `cond_write(p, v, TRUE)`. Use `cond_write` with another constraint only when
@@ -142,6 +139,26 @@ SYMBOLIC_API_RULES = """
     and merge both with `_ITE_VAR_`. Only recurse inside
     `assume(_NOT_(_EQ_(*s, '\\0')))`, never past a possible terminator.
     The inputs are bounded, so this terminates.
+
+    **Recursion bounded by a length.** A size parameter (`n`, `len`, `count`, ...)
+    is usually symbolic. `is_certain(_EQ_(n, 0))` is then never true, so a
+    recursion that only stops on it never terminates. Treat `_EQ_(n, 0)` like
+    any other symbolic condition and case split on it at every step:
+    ```c
+    cnstr_t n_zero = _EQ_(n, 0);
+    if (is_certain(n_zero)) {{ return END; }}
+    if (is_certain(_NOT_(n_zero))) {{ return STEP(s, n); }}
+    push_pc(); assume(_NOT_(n_zero)); symbolic r = STEP(s, n); pop_pc();
+    return _ITE_VAR_(n_zero, END, r);
+    ```
+    Only recurse with `n - 1` inside `assume(_NOT_(n_zero))`. Then `n` shrinks
+    on every path and becomes certainly 0 after at most the input bound.
+    Never read `s[i]` past a possibly reached bound (`n` or `'\\0'`).
+
+    **Termination check.** Before answering, check every recursion and loop:
+    on each path it must reach a base case whose condition becomes *certain*
+    (via `assume` on that path). A base case that is only ever tested with
+    `is_certain`, without an `assume` that makes it certain, does not terminate.
 
 """
 

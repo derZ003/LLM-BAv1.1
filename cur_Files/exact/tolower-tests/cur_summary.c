@@ -1,21 +1,27 @@
+#ifndef TRUE
+#define TRUE 1
+#endif
+#ifndef FALSE
+#define FALSE 0
+#endif
 int tolower(int c) {
-    cnstr_t is_upper = _AND_(_GE_(c, 'A'), _LE_(c, 'Z'));
+    symbolic sc = (symbolic)(unsigned int)c;
+    cnstr_t is_upper = _AND_(_GE_(sc, 'A'), _LE_(sc, 'Z'));
+    symbolic lowered = (symbolic)((unsigned int)sc + ('a' - 'A'));
     
     if (is_certain(is_upper)) {
-        return c | 32;
+        return (int)lowered;
     } else if (is_certain(_NOT_(is_upper))) {
-        return c;
+        return (int)sc;
     } else {
         push_pc();
         assume(is_upper);
-        int upper_res = c | 32;
+        symbolic a = lowered;
         pop_pc();
-        
         push_pc();
         assume(_NOT_(is_upper));
-        int lower_res = c;
+        symbolic b = sc;
         pop_pc();
-        
-        return _ITE_VAR_(is_upper, upper_res, lower_res);
+        return (int)_ITE_VAR_(is_upper, a, b);
     }
 }

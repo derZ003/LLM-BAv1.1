@@ -1,0 +1,37 @@
+Problem:
+1. bzero has void return type (sets buffer to zero)
+-> modify SBV/create_test
+-> Alternative: use Wrapper
+2. symbolic is void* -> size is 4 bytes
+-> too big (only need 1 byte)
+3. inconsistency inside the model 
+-> example: following 3-case rule inside xyz-rec but not second helper
+-> failing n==0 check
+4. Problem with ensuring use of assume
+-> built skeleton that conatins right steps
+
+Ideas:
+1. ?automatically switch to underapprox. if exact failes
+2. ?automatically switch to gen_concrete when get_concrete fails
+3. !!! build cli-use
+4. ! for evaluation make stochastic analysis about cases (not compiling test, which iteration is passing the tests)
+
+Function List:
+
+Done: strncpy (zero-pads the rest), stpncpy, strlcpy (returns the source length)
+
+TODO:
+memccpy (stops at a character, returns a pointer or NULL)
+strncasecmp
+
+memmove: overlapping regions, a good test of your summary's aliasing.
+strcat, strncat, strlcat
+
+strspn, strcspn, strpbrk
+strstr, memmem, strcasestr
+
+strndup: malloc, like strdup
+strsep: modifies a char **
+strtok_r (avoid strtok, which has static state)
+
+for future: strverscmp, strxfrm, _collate, strerror/strsignal (they use tables)

@@ -1,20 +1,14 @@
-static int concrete_tolower(int c)
+int concrete_tolower(int c)
 {
-	if (c >= 65 && c <= 90)
-	{
-		return c + 32;
-	}
-	return c;
+  return (((unsigned int) (c - 'A')) < 26) ? (c | 0x20) : (c);
 }
 
-int concrete_strcasecmp(const char *_l, const char *_r)
+int concrete_strcasecmp(register const char *s1, register const char *s2)
 {
-	const unsigned char *l = (const unsigned char *)_l;
-	const unsigned char *r = (const unsigned char *)_r;
-	while (*l != 0 && *r != 0 && (*l == *r || concrete_tolower(*l) == concrete_tolower(*r)))
-	{
-		l++;
-		r++;
-	}
-	return concrete_tolower(*l) - concrete_tolower(*r);
+  int r = 0;
+  while (((s1 == s2) || (!(r = ((int) concrete_tolower(*((unsigned char *) s1))) - concrete_tolower(*((unsigned char *) s2))))) && ((++s2, *(s1++))))
+    ;
+
+  return r;
 }
+

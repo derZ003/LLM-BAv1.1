@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 
@@ -14,6 +15,14 @@ BASE_PATH = "~/_Uni/BAv1.1"
 CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files"
 TEST_TIMEOUT = 120
 TIMEOUT_MSG = (f"The symbolic execution of the summary did not terminate within {TEST_TIMEOUT} seconds")
+COMPILE_ERROR_MSG = "The summary does not compile. Compiler errors:\n"
+RUNTIME_ERROR_MSG = "The symbolic execution of the summary aborted with an error:\n"
+RUNTIME_ERROR_HINTS = {
+    "UnsatConstraintError": "An `assume(c)` was called with a condition `c` that is impossible on the current path. "
+                            "Only assume a condition in the undecided branch of its own case split.",
+    "MemoryPermissionsError": "The summary accessed memory outside the input buffers (e.g. read past a possibly reached end).",
+    "DuplicateSymbolicVariableError": "`sym_var_named` was called twice with the same name; names must be unique.",
+}
 #accepted result types per approximation mode, exact also accepted for over- and under-approximation
 ACCEPTED_RESULTS = {
     "exact": {"exact"},
@@ -27,7 +36,7 @@ SBV_EXTRA_ARGS = {
 
 #Checks every result inside .json is correct/acceptable -> result-types: "exact", "under-approximation", "over-approximation" or "bug"
 def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
-    if test_results == TIMEOUT_MSG:
+    if test_results == TIMEOUT_MSG or test_results.startswith((COMPILE_ERROR_MSG, RUNTIME_ERROR_MSG)):
         return False
     tests = json.loads(test_results)
     return len(tests) > 0 and all(t["result"] in accepted_results for t in tests.values())
@@ -78,7 +87,10 @@ def void_wrappers(concrete_code: str, func_name: str) -> tuple[str, str] | None:
     wrap = lambda name: f"\nint {name}_w({param_str})\n{{\n  {name}({arg_str});\n  return 0;\n}}\n"
     return wrap(f"concrete_{func_name}"), wrap(func_name)
 
-def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str, wrapped:bool) -> None:
+#returns the gcc errors (with source line) if the validation test does not compile, else None
+def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str, wrapped:bool) -> str | None:
+    print("Generating validation test...")
+    test_path.with_suffix(".test").unlink(missing_ok=True)
     suffix = "_w" if wrapped else ""
     testgen = subprocess.run(
         [str(Path(sys.executable).parent / "summbv"),
@@ -91,9 +103,17 @@ def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str, 
     )
     print("stdout: \n" + testgen.stdout)
     print("stderr: \n" + testgen.stderr)
-    return
+    if testgen.returncode == 0 and test_path.with_suffix(".test").exists():
+        return None
+    lines = (testgen.stdout + testgen.stderr).splitlines()
+    errors = []
+    for i, line in enumerate(lines):
+        if ": error:" in line:
+            errors += [line.split("/")[-1]] + lines[i + 1:i + 3]
+    return COMPILE_ERROR_MSG + "\n".join(dict.fromkeys(errors) if errors else lines[-5:])
 
 def run_test(func_name: str) -> str | None:
+    print("Running validation test...")
     test_results_path = CUR_DIR / f"{func_name}_validation.test_result.json"
     #remove old results
     test_results_path.unlink(missing_ok=True)
@@ -108,19 +128,27 @@ def run_test(func_name: str) -> str | None:
             timeout=TEST_TIMEOUT + 30
         )
         timed_out = "TimeoutError" in testrun.stdout
+        output = testrun.stdout + testrun.stderr
     except subprocess.TimeoutExpired:
         timed_out = True
+        output = ""
     if test_results_path.exists():
         return test_results_path.read_text()
     if timed_out:
         print("Testing Timeout.")
         return TIMEOUT_MSG
+    #runtime errors of SBV (e.g. UnsatConstraintError) are passed to the revision like compile errors
+    errors = re.findall(r"summboundverify\.exceptions\.exceptions\.(\w+): (.*)", output)
+    if errors:
+        name, msg = errors[-1]
+        print(f"Testing aborted: {name}")
+        return RUNTIME_ERROR_MSG + f"{name}: {msg}\n" + RUNTIME_ERROR_HINTS.get(name, "")
     return None
 
 def insert_parameters() -> tuple[str, str, set[str]]:
     #func_name = sys.argv[1]
     #approx_mode = sys.argv[2]
-    func_name = "strncpy"
+    func_name = "strlcpy"
     approx_mode = "exact"
     accepted_results = ACCEPTED_RESULTS[approx_mode]
     print(f"Generating symbolic summary for {func_name} with {approx_mode}-approximation...")
@@ -147,8 +175,7 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
     concrete_path = CUR_DIR / "cur_concrete.c"
     summ_path = CUR_DIR / "cur_summary.c"
 
-    gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None)
-    test_results = run_test(func_name)
+    test_results = gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None) or run_test(func_name)
 
     #skip regeneration of symbolic summary if the result is accepted for this approximation mode
     if test_results is not None:
@@ -159,10 +186,9 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
             summary = gen_revision_summary(approx_mode, func_name, func_code, summary, test_results)
             write_summary_cur_Files(summary + summ_wrap)
             #retesting revised summary
-            gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None)
-            test_results = run_test(func_name)
+            test_results = gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None) or run_test(func_name)
             if test_results is None:
-                print("No test results found after revision, stopping.")
+                print("No test results exist after revision, stopping.")
                 break
             print("Updated test results:\n" + test_results)
             i += 1

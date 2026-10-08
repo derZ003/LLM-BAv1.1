@@ -1,33 +1,33 @@
-static size_t concrete_strlen(const char *s)
+void *concrete_memcpy(void *s1, const void *s2, size_t n)
 {
-    size_t len = 0;
-    while (s[len] != '\0')
-    {
-        len++;
-    }
-    return len;
+  register char *r1 = s1;
+  register const char *r2 = s2;
+  while (n)
+  {
+    *(r1++) = *(r2++);
+    --n;
+  }
+
+  return s1;
 }
 
-static void *concrete_memcpy(void *dest, const void *src, size_t n)
+size_t concrete_strlen(const char *s)
 {
-    unsigned char *d = (unsigned char *)dest;
-    const unsigned char *s = (const unsigned char *)src;
-    for (size_t i = 0; i < n; i++)
-    {
-        d[i] = s[i];
-    }
-    return dest;
+  register const char *p;
+  for (p = s; *p; p++)
+    ;
+
+  return p - s;
 }
 
-extern void *malloc(size_t size);
-
-char *concrete_strdup(const char *s)
+char *concrete_strdup(register const char *s1)
 {
-    size_t l = concrete_strlen(s);
-    char *d = (char *)malloc(l + 1);
-    if (!d)
-    {
-        return NULL;
-    }
-    return (char *)concrete_memcpy(d, s, l + 1);
+  register char *s;
+  register size_t l = (concrete_strlen(s1) + 1) * (sizeof(char));
+  if ((s = malloc(l)) != NULL)
+  {
+    concrete_memcpy(s, s1, l);
+  }
+  return s;
 }
+

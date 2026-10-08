@@ -46,27 +46,19 @@ size_t concrete_strlen(const char *s)
   return p - s;
 }
 
-static symbolic strlen_rec(const char *s, size_t offset)
+static symbolic strlen_rec(const char *s, size_t len)
 {
-  symbolic curr_char = *(s + offset);
-  cnstr_t is_null = _EQ_(curr_char, (symbolic) 0);
-  if (is_certain(is_null))
+  symbolic c = (symbolic) ((unsigned long) (*((const unsigned char *) s)));
+  cnstr_t end = _EQ_(c, 0);
+  if (is_certain(end))
   {
-    return (symbolic) offset;
-  }
-  if (is_certain(_NOT_(is_null)))
-  {
-    return strlen_rec(s, offset + 1);
+    return (symbolic) len;
   }
   push_pc();
-  assume(is_null);
-  symbolic res_null = (symbolic) offset;
+  assume(_NOT_(end));
+  symbolic r = strlen_rec(s + 1, len + 1);
   pop_pc();
-  push_pc();
-  assume(_NOT_(is_null));
-  symbolic res_rec = strlen_rec(s, offset + 1);
-  pop_pc();
-  return _ITE_VAR_(is_null, res_null, res_rec);
+  return _ITE_VAR_(end, (symbolic) len, r);
 }
 
 size_t strlen(const char *s)
@@ -84,6 +76,7 @@ void test_1()
 
   s[ARRAY_SIZE_1 - 1] = '\0';
   state_t initial_state = save_current_state();
+  mem_addr("s", s, ARRAY_SIZE_1);
   size_t ret1 = concrete_strlen(s);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(size_t) * 8);
   store_cnstr("cnctr_test1", cnstr1);

@@ -46,35 +46,24 @@ void *concrete_rawmemchr(const void *s, int c)
   return (void *) r;
 }
 
-static void *rawmemchr_rec(const unsigned char *s, unsigned char c)
+static symbolic rec_rawmemchr(const unsigned char *s, unsigned char c)
 {
-  cnstr_t found = _EQ_(*s, c);
-  if (is_certain(found))
+  symbolic curr_byte = (symbolic) ((unsigned long) (*s));
+  cnstr_t end = _EQ_(curr_byte, (symbolic) c);
+  if (is_certain(end))
   {
-    return (void *) s;
+    return (symbolic) s;
   }
-  else
-    if (is_certain(_NOT_(found)))
-  {
-    return rawmemchr_rec(s + 1, c);
-  }
-  else
-  {
-    push_pc();
-    assume(found);
-    void *a = (void *) s;
-    pop_pc();
-    push_pc();
-    assume(_NOT_(found));
-    void *b = rawmemchr_rec(s + 1, c);
-    pop_pc();
-    return _ITE_VAR_(found, a, b);
-  }
+  push_pc();
+  assume(_NOT_(end));
+  symbolic r = rec_rawmemchr(s + 1, c);
+  pop_pc();
+  return _ITE_VAR_(end, (symbolic) s, r);
 }
 
 void *rawmemchr(const void *s, int c)
 {
-  return rawmemchr_rec((const unsigned char *) s, (unsigned char) c);
+  return (void *) rec_rawmemchr((const unsigned char *) s, (unsigned char) c);
 }
 
 void test_1()
@@ -88,6 +77,7 @@ void test_1()
   s[ARRAY_SIZE_1 - 1] = '\0';
   int c = 0;
   state_t initial_state = save_current_state();
+  mem_addr("s", s, ARRAY_SIZE_1);
   void * ret1 = concrete_rawmemchr(s, c);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(void *) * 8);
   store_cnstr("cnctr_test1", cnstr1);

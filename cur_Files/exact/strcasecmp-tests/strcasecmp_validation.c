@@ -31,7 +31,6 @@ cnstr_t _GE_(symbolic var1, symbolic var2) {return 0;}
 cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _LE_(symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
-void allocd(void* ptr, size_t size) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
 void pop_pc(){return;}
 void push_pc(){return;}
@@ -39,97 +38,112 @@ void push_pc(){return;}
 #define POINTER_SIZE 5
 #define FUEL 5
 #define ARRAY_SIZE_1 5
+#define MAX_NUM_1 5
 
-static int concrete_tolower(int c)
+int concrete_tolower(int c)
 {
-  if ((c >= 65) && (c <= 90))
+  return (((unsigned int) (c - 'A')) < 26) ? (c | 0x20) : (c);
+}
+
+int concrete_strcasecmp(register const char *s1, register const char *s2)
+{
+  int r = 0;
+  while (((s1 == s2) || (!(r = ((int) concrete_tolower(*((unsigned char *) s1))) - concrete_tolower(*((unsigned char *) s2))))) && ((++s2, *(s1++))))
+    ;
+
+  return r;
+}
+
+static symbolic to_lower_sym(symbolic c)
+{
+  cnstr_t is_upper = _AND_(_GE_(c, (symbolic) 'A'), _LE_(c, (symbolic) 'Z'));
+  symbolic lower = (symbolic) (((unsigned long) c) + 32);
+  if (is_certain(is_upper))
+    return lower;
+  if (is_certain(_NOT_(is_upper)))
+    return c;
+  push_pc();
+  assume(is_upper);
+  symbolic a = lower;
+  pop_pc();
+  push_pc();
+  assume(_NOT_(is_upper));
+  symbolic b = c;
+  pop_pc();
+  return _ITE_VAR_(is_upper, a, b);
+}
+
+static symbolic strcasecmp_rec(const char *s1, const char *s2)
+{
+  symbolic c1 = (symbolic) ((unsigned long) (*((const unsigned char *) s1)));
+  cnstr_t end = _EQ_(c1, 0);
+  if (is_certain(end))
   {
-    return c + 32;
+    symbolic c2 = (symbolic) ((unsigned long) (*((const unsigned char *) s2)));
+    symbolic l2 = to_lower_sym(c2);
+    return (symbolic) (((int) 0) - ((int) l2));
   }
-  return c;
-}
-
-int concrete_strcasecmp(const char *_l, const char *_r)
-{
-  const unsigned char *l = (const unsigned char *) _l;
-  const unsigned char *r = (const unsigned char *) _r;
-  while ((((*l) != 0) && ((*r) != 0)) && (((*l) == (*r)) || (concrete_tolower(*l) == concrete_tolower(*r))))
+  push_pc();
+  assume(_NOT_(end));
+  symbolic c2 = (symbolic) ((unsigned long) (*((const unsigned char *) s2)));
+  symbolic l1 = to_lower_sym(c1);
+  symbolic l2 = to_lower_sym(c2);
+  cnstr_t eq = _EQ_(l1, l2);
+  symbolic r;
+  if (is_certain(eq))
   {
-    l++;
-    r++;
-  }
-
-  return concrete_tolower(*l) - concrete_tolower(*r);
-}
-
-static symbolic sym_tolower(symbolic c)
-{
-  cnstr_t is_upper = _AND_(_GE_(c, 'A'), _LE_(c, 'Z'));
-  return _ITE_VAR_(is_upper, c + ('a' - 'A'), c);
-}
-
-static int strcasecmp_recursive(const char *_l, const char *_r, size_t i)
-{
-  allocd((void *) _l, i + 1);
-  allocd((void *) _r, i + 1);
-  symbolic l_val = (symbolic) ((unsigned char) _l[i]);
-  symbolic r_val = (symbolic) ((unsigned char) _r[i]);
-  symbolic tl = sym_tolower(l_val);
-  symbolic tr = sym_tolower(r_val);
-  cnstr_t l_null = _EQ_(l_val, 0);
-  cnstr_t r_null = _EQ_(r_val, 0);
-  cnstr_t eq_case = _EQ_(tl, tr);
-  cnstr_t loop_cond = _AND_(_NOT_(l_null), _AND_(_NOT_(r_null), eq_case));
-  if (is_certain(loop_cond))
-  {
-    return strcasecmp_recursive(_l, _r, i + 1);
+    r = strcasecmp_rec(s1 + 1, s2 + 1);
   }
   else
-    if (is_certain(_NOT_(loop_cond)))
+    if (is_certain(_NOT_(eq)))
   {
-    return (int) (tl - tr);
+    r = (symbolic) (((int) l1) - ((int) l2));
   }
   else
   {
     push_pc();
-    assume(loop_cond);
-    int res_continue = strcasecmp_recursive(_l, _r, i + 1);
+    assume(eq);
+    symbolic a = strcasecmp_rec(s1 + 1, s2 + 1);
     pop_pc();
     push_pc();
-    assume(_NOT_(loop_cond));
-    int res_break = (int) (tl - tr);
+    assume(_NOT_(eq));
+    symbolic b = (symbolic) (((int) l1) - ((int) l2));
     pop_pc();
-    return (int) _ITE_VAR_(loop_cond, (symbolic) res_continue, (symbolic) res_break);
+    r = _ITE_VAR_(eq, a, b);
   }
+  pop_pc();
+  return _ITE_VAR_(end, (symbolic) (((int) 0) - ((int) to_lower_sym((symbolic) ((unsigned long) (*((const unsigned char *) s2)))))), r);
 }
 
-int strcasecmp(const char *_l, const char *_r)
+int strcasecmp(const char *s1, const char *s2)
 {
-  return strcasecmp_recursive(_l, _r, 0);
+  return (int) strcasecmp_rec(s1, s2);
 }
 
 void test_1()
 {
-  char _l[ARRAY_SIZE_1];
-  for (int _l_idx_1 = 0; _l_idx_1 < ARRAY_SIZE_1; _l_idx_1++)
+  char s1[ARRAY_SIZE_1];
+  for (int s1_idx_1 = 0; s1_idx_1 < ARRAY_SIZE_1; s1_idx_1++)
   {
-    _l[_l_idx_1] = sym_var_array("_l", _l_idx_1, sizeof(char) * 8);
+    s1[s1_idx_1] = sym_var_array("s1", s1_idx_1, sizeof(char) * 8);
   }
 
-  _l[ARRAY_SIZE_1 - 1] = '\0';
-  char _r[ARRAY_SIZE_1];
-  for (int _r_idx_1 = 0; _r_idx_1 < ARRAY_SIZE_1; _r_idx_1++)
+  s1[ARRAY_SIZE_1 - 1] = '\0';
+  char s2[ARRAY_SIZE_1];
+  for (int s2_idx_1 = 0; s2_idx_1 < ARRAY_SIZE_1; s2_idx_1++)
   {
-    _r[_r_idx_1] = sym_var_array("_r", _r_idx_1, sizeof(char) * 8);
+    s2[s2_idx_1] = sym_var_array("s2", s2_idx_1, sizeof(char) * 8);
   }
 
-  _r[ARRAY_SIZE_1 - 1] = '\0';
+  s2[ARRAY_SIZE_1 - 1] = '\0';
   state_t initial_state = save_current_state();
-  int ret1 = concrete_strcasecmp(_l, _r);
+  mem_addr("s1", s1, ARRAY_SIZE_1);
+  mem_addr("s2", s2, ARRAY_SIZE_1);
+  int ret1 = concrete_strcasecmp(s1, s2);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(int) * 8);
   store_cnstr("cnctr_test1", cnstr1);
   halt_all(initial_state);
-  int ret2 = strcasecmp(_l, _r);
+  int ret2 = strcasecmp(s1, s2);
   cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(int) * 8);
   store_cnstr("summ_test1", cnstr2);
   halt_all(NULL);

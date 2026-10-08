@@ -53,117 +53,46 @@ void *concrete_memchr(const void *s, int c, size_t n)
   return 0;
 }
 
-static void *memchr_rec(const char *s, int c, size_t n)
+static symbolic memchr_rec(const char *s, symbolic c, size_t n)
 {
-  cnstr_t n_zero = _EQ_(n, 0);
-  if (is_certain(n_zero))
+  cnstr_t end = _EQ_(n, 0);
+  if (is_certain(end))
   {
-    return (void *) 0;
+    return (symbolic) 0;
   }
-  if (is_certain(_NOT_(n_zero)))
+  push_pc();
+  assume(_NOT_(end));
+  symbolic cur = (symbolic) ((unsigned long) (*((const unsigned char *) s)));
+  cnstr_t found = _EQ_(cur, c);
+  symbolic r;
+  if (is_certain(found))
   {
-    symbolic val = *((const char *) s);
-    cnstr_t found = _EQ_(val, (char) c);
-    if (is_certain(found))
-    {
-      return (void *) s;
-    }
+    r = (symbolic) s;
+  }
+  else
     if (is_certain(_NOT_(found)))
-    {
-      return memchr_rec(s + 1, c, n - 1);
-    }
+  {
+    r = memchr_rec(s + 1, c, n - 1);
+  }
+  else
+  {
     push_pc();
     assume(found);
-    void *res_found = (void *) s;
+    symbolic a = (symbolic) s;
     pop_pc();
     push_pc();
     assume(_NOT_(found));
-    void *res_not_found = memchr_rec(s + 1, c, n - 1);
+    symbolic b = memchr_rec(s + 1, c, n - 1);
     pop_pc();
-    return _ITE_VAR_(found, (symbolic) res_found, (symbolic) res_not_found);
+    r = _ITE_VAR_(found, a, b);
   }
-  push_pc();
-  assume(n_zero);
-  void *res_zero = (void *) 0;
   pop_pc();
-  push_pc();
-  assume(_NOT_(n_zero));
-  void *res_nonzero = memchr_rec(s, c, n);
-  pop_pc();
-  push_pc();
-  assume(n_zero);
-  void *r0 = (void *) 0;
-  pop_pc();
-  push_pc();
-  assume(_NOT_(n_zero));
-  symbolic v = *((const char *) s);
-  cnstr_t f = _EQ_(v, (char) c);
-  push_pc();
-  assume(f);
-  void *rf = (void *) s;
-  pop_pc();
-  push_pc();
-  assume(_NOT_(f));
-  void *rnf = memchr_rec(s + 1, c, n - 1);
-  pop_pc();
-  void *r_nonzero = _ITE_VAR_(f, (symbolic) rf, (symbolic) rnf);
-  pop_pc();
-  return _ITE_VAR_(n_zero, (symbolic) r0, (symbolic) r_nonzero);
-}
-
-static void *memchr_impl(const char *s, int c, size_t n)
-{
-  cnstr_t n_zero = _EQ_(n, 0);
-  if (is_certain(n_zero))
-  {
-    return (void *) 0;
-  }
-  if (is_certain(_NOT_(n_zero)))
-  {
-    symbolic val = *((const char *) s);
-    cnstr_t found = _EQ_(val, (char) c);
-    if (is_certain(found))
-    {
-      return (void *) s;
-    }
-    if (is_certain(_NOT_(found)))
-    {
-      return memchr_impl(s + 1, c, n - 1);
-    }
-    push_pc();
-    assume(found);
-    void *a = (void *) s;
-    pop_pc();
-    push_pc();
-    assume(_NOT_(found));
-    void *b = memchr_impl(s + 1, c, n - 1);
-    pop_pc();
-    return _ITE_VAR_(found, (symbolic) a, (symbolic) b);
-  }
-  push_pc();
-  assume(n_zero);
-  void *r_zero = (void *) 0;
-  pop_pc();
-  push_pc();
-  assume(_NOT_(n_zero));
-  symbolic val = *((const char *) s);
-  cnstr_t found = _EQ_(val, (char) c);
-  push_pc();
-  assume(found);
-  void *rf = (void *) s;
-  pop_pc();
-  push_pc();
-  assume(_NOT_(found));
-  void *rnf = memchr_impl(s + 1, c, n - 1);
-  pop_pc();
-  void *r_not_zero = _ITE_VAR_(found, (symbolic) rf, (symbolic) rnf);
-  pop_pc();
-  return _ITE_VAR_(n_zero, (symbolic) r_zero, (symbolic) r_not_zero);
+  return _ITE_VAR_(end, (symbolic) 0, r);
 }
 
 void *memchr(const void *s, int c, size_t n)
 {
-  return memchr_impl((const char *) s, c, n);
+  return (void *) memchr_rec((const char *) s, (symbolic) ((unsigned char) c), n);
 }
 
 void test_1()
@@ -182,6 +111,7 @@ void test_1()
   size_t max_2 = MAX_NUM_1;
   assume(_ULE_(n, max_2));
   state_t initial_state = save_current_state();
+  mem_addr("s", s, ARRAY_SIZE_1);
   void * ret1 = concrete_memchr(s, c, n);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(void *) * 8);
   store_cnstr("cnctr_test1", cnstr1);

@@ -28,7 +28,6 @@ void store_cnstr(char* name, cnstr_t constraint) {return;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
 cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
-void allocd(void* ptr, size_t size) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
 void pop_pc(){return;}
 void push_pc(){return;}
@@ -50,45 +49,46 @@ size_t concrete_strnlen(const char *s, size_t max)
   return p - s;
 }
 
-static symbolic strnlen_rec(const char *s, size_t max)
+static symbolic strnlen_rec(const char *s, size_t n)
 {
-  cnstr_t max_zero = _EQ_(max, 0);
-  if (is_certain(max_zero))
+  cnstr_t end_n = _EQ_(n, 0);
+  if (is_certain(end_n))
   {
     return 0;
   }
-  allocd(s, 1);
-  cnstr_t s_null = _EQ_(*s, '\0');
-  if (is_certain(s_null))
+  push_pc();
+  assume(_NOT_(end_n));
+  symbolic c = (symbolic) ((unsigned long) (*((const unsigned char *) s)));
+  cnstr_t end_s = _EQ_(c, 0);
+  symbolic r;
+  if (is_certain(end_s))
   {
-    return 0;
+    r = 0;
   }
-  if (is_certain(_NOT_(max_zero)) && is_certain(_NOT_(s_null)))
+  else
+    if (is_certain(_NOT_(end_s)))
   {
-    return 1 + strnlen_rec(s + 1, max - 1);
+    r = (symbolic) (((unsigned long) 1) + ((unsigned long) strnlen_rec(s + 1, n - 1)));
   }
-  push_pc();
-  assume(max_zero);
-  symbolic r_zero = 0;
+  else
+  {
+    push_pc();
+    assume(end_s);
+    symbolic a = 0;
+    pop_pc();
+    push_pc();
+    assume(_NOT_(end_s));
+    symbolic b = (symbolic) (((unsigned long) 1) + ((unsigned long) strnlen_rec(s + 1, n - 1)));
+    pop_pc();
+    r = _ITE_VAR_(end_s, a, b);
+  }
   pop_pc();
-  push_pc();
-  assume(_NOT_(max_zero));
-  push_pc();
-  assume(s_null);
-  symbolic r_null = 0;
-  pop_pc();
-  push_pc();
-  assume(_NOT_(s_null));
-  symbolic r_rec = 1 + strnlen_rec(s + 1, max - 1);
-  pop_pc();
-  symbolic r_not_zero = _ITE_VAR_(s_null, r_null, r_rec);
-  pop_pc();
-  return _ITE_VAR_(max_zero, r_zero, r_not_zero);
+  return _ITE_VAR_(end_n, (symbolic) 0, r);
 }
 
 size_t strnlen(const char *s, size_t max)
 {
-  return (size_t) strnlen_rec(s, max);
+  return (size_t) ((unsigned long) strnlen_rec(s, max));
 }
 
 void test_1()
@@ -104,6 +104,7 @@ void test_1()
   size_t max_1 = MAX_NUM_1;
   assume(_ULE_(max, max_1));
   state_t initial_state = save_current_state();
+  mem_addr("s", s, ARRAY_SIZE_1);
   size_t ret1 = concrete_strnlen(s, max);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(size_t) * 8);
   store_cnstr("cnctr_test1", cnstr1);

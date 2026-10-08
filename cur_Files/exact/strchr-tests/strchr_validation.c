@@ -50,66 +50,50 @@ char *concrete_strchr(register const char *s, int c)
   return 0;
 }
 
-char *strchr(const char *s, int c)
+static symbolic strchr_rec(const char *s, symbolic c)
 {
-  symbolic sym_c = (symbolic) ((char) c);
-  cnstr_t found = _EQ_(*s, sym_c);
-  cnstr_t null = _EQ_(*s, '\0');
+  symbolic curr_byte = (symbolic) ((unsigned long) (*((const unsigned char *) s)));
+  cnstr_t found = _EQ_(curr_byte, c);
+  cnstr_t end = _EQ_(curr_byte, 0);
   if (is_certain(found))
   {
-    return (char *) s;
+    return (symbolic) s;
   }
-  if (is_certain(_NOT_(found)))
+  if (is_certain(end))
   {
-    if (is_certain(null))
-    {
-      return (char *) 0;
-    }
-    if (is_certain(_NOT_(null)))
-    {
-      return strchr(s + 1, c);
-    }
-    push_pc();
-    assume(null);
-    symbolic r_null = (symbolic) ((char *) 0);
-    pop_pc();
-    push_pc();
-    assume(_NOT_(null));
-    symbolic r_rec = (symbolic) strchr(s + 1, c);
-    pop_pc();
-    return (char *) _ITE_VAR_(null, r_null, r_rec);
+    return _ITE_VAR_(found, (symbolic) s, (symbolic) 0);
   }
   push_pc();
-  assume(found);
-  symbolic r_found = (symbolic) ((char *) s);
-  pop_pc();
-  push_pc();
-  assume(_NOT_(found));
-  cnstr_t null_inner = _EQ_(*s, '\0');
-  symbolic r_not_found;
-  if (is_certain(null_inner))
+  assume(_NOT_(end));
+  symbolic r;
+  if (is_certain(found))
   {
-    r_not_found = (symbolic) ((char *) 0);
+    r = (symbolic) s;
   }
   else
-    if (is_certain(_NOT_(null_inner)))
+    if (is_certain(_NOT_(found)))
   {
-    r_not_found = (symbolic) strchr(s + 1, c);
+    r = strchr_rec(((const char *) s) + 1, c);
   }
   else
   {
     push_pc();
-    assume(null_inner);
-    symbolic rn = (symbolic) ((char *) 0);
+    assume(found);
+    symbolic a = (symbolic) s;
     pop_pc();
     push_pc();
-    assume(_NOT_(null_inner));
-    symbolic rr = (symbolic) strchr(s + 1, c);
+    assume(_NOT_(found));
+    symbolic b = strchr_rec(((const char *) s) + 1, c);
     pop_pc();
-    r_not_found = _ITE_VAR_(null_inner, rn, rr);
+    r = _ITE_VAR_(found, a, b);
   }
   pop_pc();
-  return (char *) _ITE_VAR_(found, r_found, r_not_found);
+  return _ITE_VAR_(end, _ITE_VAR_(found, (symbolic) s, (symbolic) 0), r);
+}
+
+char *strchr(const char *s, int c)
+{
+  return (char *) strchr_rec(s, (symbolic) ((unsigned char) c));
 }
 
 void test_1()
@@ -125,6 +109,7 @@ void test_1()
   int max_1 = MAX_NUM_1;
   assume(_ULE_(c, max_1));
   state_t initial_state = save_current_state();
+  mem_addr("s", s, ARRAY_SIZE_1);
   char * ret1 = concrete_strchr(s, c);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(char *) * 8);
   store_cnstr("cnctr_test1", cnstr1);

@@ -37,54 +37,46 @@ void push_pc(){return;}
 #define POINTER_SIZE 5
 #define FUEL 5
 #define ARRAY_SIZE_1 5
-
-static int concrete_isupper(int c)
-{
-  if ((c >= 65) && (c <= 90))
-  {
-    return 1;
-  }
-  return 0;
-}
+#define MAX_NUM_1 5
 
 int concrete_tolower(int c)
 {
-  if (concrete_isupper(c))
-  {
-    return c | 32;
-  }
-  return c;
+  return (((unsigned int) (c - 'A')) < 26) ? (c | 0x20) : (c);
 }
 
 int tolower(int c)
 {
-  cnstr_t is_upper = _AND_(_GE_(c, 'A'), _LE_(c, 'Z'));
+  symbolic sc = (symbolic) ((unsigned int) c);
+  cnstr_t is_upper = _AND_(_GE_(sc, 'A'), _LE_(sc, 'Z'));
+  symbolic lowered = (symbolic) (((unsigned int) sc) + ('a' - 'A'));
   if (is_certain(is_upper))
   {
-    return c | 32;
+    return (int) lowered;
   }
   else
     if (is_certain(_NOT_(is_upper)))
   {
-    return c;
+    return (int) sc;
   }
   else
   {
     push_pc();
     assume(is_upper);
-    int upper_res = c | 32;
+    symbolic a = lowered;
     pop_pc();
     push_pc();
     assume(_NOT_(is_upper));
-    int lower_res = c;
+    symbolic b = sc;
     pop_pc();
-    return _ITE_VAR_(is_upper, upper_res, lower_res);
+    return (int) _ITE_VAR_(is_upper, a, b);
   }
 }
 
 void test_1()
 {
   int c = sym_var_named("c", sizeof(int) * 8);
+  int max_1 = MAX_NUM_1;
+  assume(_ULE_(c, max_1));
   state_t initial_state = save_current_state();
   int ret1 = concrete_tolower(c);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(int) * 8);

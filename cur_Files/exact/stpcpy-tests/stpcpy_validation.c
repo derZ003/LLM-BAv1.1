@@ -25,9 +25,11 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
+cnstr_t _AND_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
 cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
+void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
 void pop_pc(){return;}
 void push_pc(){return;}
@@ -45,39 +47,28 @@ char *concrete_stpcpy(register char *s1, const char *s2)
   return s1 - 1;
 }
 
-static void *stpcpy_rec(char *s1, const char *s2)
+static symbolic stpcpy_rec(char *d, const char *s, cnstr_t guard)
 {
-  cnstr_t is_null = _EQ_(*s2, '\0');
-  if (is_certain(is_null))
+  symbolic c = (symbolic) ((unsigned long) (*((const unsigned char *) s)));
+  cnstr_t end = _EQ_(c, 0);
+  if (is_certain(end))
   {
-    *s1 = *s2;
-    return s1;
+    cond_write(d, 0, guard);
+    return (symbolic) d;
   }
-  else
-    if (is_certain(_NOT_(is_null)))
-  {
-    *s1 = *s2;
-    return stpcpy_rec(s1 + 1, s2 + 1);
-  }
-  else
-  {
-    push_pc();
-    assume(is_null);
-    *s1 = *s2;
-    void *res_null = s1;
-    pop_pc();
-    push_pc();
-    assume(_NOT_(is_null));
-    *s1 = *s2;
-    void *res_not_null = stpcpy_rec(s1 + 1, s2 + 1);
-    pop_pc();
-    return _ITE_VAR_(is_null, res_null, res_not_null);
-  }
+  push_pc();
+  assume(_NOT_(end));
+  cnstr_t g = _AND_(guard, _NOT_(end));
+  cond_write(d, c, g);
+  symbolic r = stpcpy_rec(d + 1, s + 1, g);
+  pop_pc();
+  cond_write(d, 0, _AND_(guard, end));
+  return _ITE_VAR_(end, (symbolic) d, r);
 }
 
 char *stpcpy(char *dest, const char *src)
 {
-  return (char *) stpcpy_rec(dest, src);
+  return (char *) stpcpy_rec(dest, src, 1);
 }
 
 void test_1()
@@ -97,6 +88,8 @@ void test_1()
 
   src[ARRAY_SIZE_1 - 1] = '\0';
   state_t initial_state = save_current_state();
+  mem_addr("dest", dest, ARRAY_SIZE_1);
+  mem_addr("src", src, ARRAY_SIZE_1);
   char * ret1 = concrete_stpcpy(dest, src);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(char *) * 8);
   store_cnstr("cnctr_test1", cnstr1);

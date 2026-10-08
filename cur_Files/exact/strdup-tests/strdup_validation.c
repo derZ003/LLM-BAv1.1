@@ -25,90 +25,114 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
+cnstr_t _AND_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
+cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
 void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
 void* mem_alloc(size_t bytes) {return 0;}
+void pop_pc(){return;}
+void push_pc(){return;}
 
 #define POINTER_SIZE 5
 #define FUEL 5
 #define ARRAY_SIZE_1 5
+#define MAX_NUM_1 5
 
-static size_t concrete_strlen(const char *s)
+void *concrete_memcpy(void *s1, const void *s2, size_t n)
 {
-  size_t len = 0;
-  while (s[len] != '\0')
+  register char *r1 = s1;
+  register const char *r2 = s2;
+  while (n)
   {
-    len++;
+    *(r1++) = *(r2++);
+    --n;
   }
 
-  return len;
+  return s1;
 }
 
-static void *concrete_memcpy(void *dest, const void *src, size_t n)
+size_t concrete_strlen(const char *s)
 {
-  unsigned char *d = (unsigned char *) dest;
-  const unsigned char *s = (const unsigned char *) src;
-  for (size_t i = 0; i < n; i++)
-  {
-    d[i] = s[i];
-  }
+  register const char *p;
+  for (p = s; *p; p++)
+    ;
 
-  return dest;
+  return p - s;
 }
 
-char *concrete_strdup(const char *s)
+char *concrete_strdup(register const char *s1)
 {
-  size_t l = concrete_strlen(s);
-  char *d = (char *) malloc(l + 1);
-  if (!d)
+  register char *s;
+  register size_t l = (concrete_strlen(s1) + 1) * (sizeof(char));
+  if ((s = malloc(l)) != 0)
   {
-    return 0;
+    concrete_memcpy(s, s1, l);
   }
-  return (char *) concrete_memcpy(d, s, l + 1);
+  return s;
 }
 
-static size_t sym_strlen(const char *s)
+static symbolic strdup_rec_len(const char *s, size_t n)
 {
-  if (is_certain(_EQ_(*s, 0)))
+  symbolic c = (symbolic) ((unsigned long) (*((const unsigned char *) s)));
+  cnstr_t end = _EQ_(c, 0);
+  if (is_certain(end))
   {
-    return 0;
+    return (symbolic) n;
   }
-  return 1 + sym_strlen(s + 1);
+  push_pc();
+  assume(_NOT_(end));
+  symbolic r = strdup_rec_len(s + 1, n + 1);
+  pop_pc();
+  return _ITE_VAR_(end, (symbolic) n, r);
 }
 
-char *strdup(const char *s)
+static void strdup_rec_copy(char *dest, const char *src, size_t n, cnstr_t guard)
 {
-  size_t len = sym_strlen(s);
-  char *d = (char *) mem_alloc(len + 1);
-  if (d == 0)
+  symbolic c = (symbolic) ((unsigned long) (*((const unsigned char *) src)));
+  cnstr_t end = _EQ_(c, 0);
+  if (is_certain(end))
   {
-    return 0;
+    cond_write(dest, 0, guard);
+    return;
   }
-  for (size_t i = 0; i <= len; i++)
-  {
-    cond_write(d + i, *(s + i), _NOT_(_EQ_(0, 0)));
-  }
+  push_pc();
+  assume(_NOT_(end));
+  cnstr_t g = _AND_(guard, _NOT_(end));
+  cond_write(dest, c, g);
+  strdup_rec_copy(dest + 1, src + 1, n + 1, g);
+  pop_pc();
+}
 
-  return d;
+char *strdup(const char *s1)
+{
+  symbolic len = strdup_rec_len(s1, 0);
+  size_t size = ((size_t) len) + 1;
+  char *s = (char *) mem_alloc(size);
+  if (s != 0)
+  {
+    strdup_rec_copy(s, s1, 0, 1);
+  }
+  return s;
 }
 
 void test_1()
 {
-  char s[ARRAY_SIZE_1];
-  for (int s_idx_1 = 0; s_idx_1 < ARRAY_SIZE_1; s_idx_1++)
+  char s1[ARRAY_SIZE_1];
+  for (int s1_idx_1 = 0; s1_idx_1 < ARRAY_SIZE_1; s1_idx_1++)
   {
-    s[s_idx_1] = sym_var_array("s", s_idx_1, sizeof(char) * 8);
+    s1[s1_idx_1] = sym_var_array("s1", s1_idx_1, sizeof(char) * 8);
   }
 
-  s[ARRAY_SIZE_1 - 1] = '\0';
+  s1[ARRAY_SIZE_1 - 1] = '\0';
   state_t initial_state = save_current_state();
-  char * ret1 = concrete_strdup(s);
+  mem_addr("s1", s1, ARRAY_SIZE_1);
+  char * ret1 = concrete_strdup(s1);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(char *) * 8);
   store_cnstr("cnctr_test1", cnstr1);
   halt_all(initial_state);
-  char * ret2 = strdup(s);
+  char * ret2 = strdup(s1);
   cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(char *) * 8);
   store_cnstr("summ_test1", cnstr2);
   halt_all(NULL);

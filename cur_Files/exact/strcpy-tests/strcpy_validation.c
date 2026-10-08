@@ -25,8 +25,10 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
+cnstr_t _AND_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
+void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
 void pop_pc(){return;}
 void push_pc(){return;}
@@ -45,36 +47,27 @@ char *concrete_strcpy(char *s1, const char *s2)
   return s1;
 }
 
-static void strcpy_recursive(char *s1, const char *s2)
+static void strcpy_rec(char *d, const char *s, cnstr_t guard)
 {
-  cnstr_t is_null = _EQ_(*s2, 0);
-  if (is_certain(is_null))
+  symbolic c = (symbolic) ((unsigned long) (*((const unsigned char *) s)));
+  cnstr_t end = _EQ_(c, 0);
+  if (is_certain(end))
   {
-    *s1 = *s2;
+    cond_write(d, 0, guard);
+    return;
   }
-  else
-    if (is_certain(_NOT_(is_null)))
-  {
-    *s1 = *s2;
-    strcpy_recursive(s1 + 1, s2 + 1);
-  }
-  else
-  {
-    push_pc();
-    assume(is_null);
-    *s1 = *s2;
-    pop_pc();
-    push_pc();
-    assume(_NOT_(is_null));
-    *s1 = *s2;
-    strcpy_recursive(s1 + 1, s2 + 1);
-    pop_pc();
-  }
+  push_pc();
+  assume(_NOT_(end));
+  cnstr_t g = _AND_(guard, _NOT_(end));
+  cond_write(d, c, g);
+  strcpy_rec(d + 1, s + 1, g);
+  pop_pc();
+  cond_write(d, 0, _AND_(guard, end));
 }
 
 char *strcpy(char *dest, const char *src)
 {
-  strcpy_recursive(dest, src);
+  strcpy_rec(dest, src, 1);
   return dest;
 }
 
@@ -95,6 +88,8 @@ void test_1()
 
   src[ARRAY_SIZE_1 - 1] = '\0';
   state_t initial_state = save_current_state();
+  mem_addr("dest", dest, ARRAY_SIZE_1);
+  mem_addr("src", src, ARRAY_SIZE_1);
   char * ret1 = concrete_strcpy(dest, src);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(char *) * 8);
   store_cnstr("cnctr_test1", cnstr1);

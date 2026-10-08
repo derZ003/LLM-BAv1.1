@@ -25,10 +25,9 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
+cnstr_t _AND_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
-cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
-void allocd(void* ptr, size_t size) {return;}
 void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
 void pop_pc(){return;}
@@ -51,35 +50,25 @@ void *concrete_memset(void *s, int c, size_t n)
   return s;
 }
 
-static void *memset_recursive(void *s, int c, size_t n)
+static void memset_rec(unsigned char *p, symbolic c, size_t n, cnstr_t guard)
 {
-  cnstr_t n_zero = _EQ_(n, 0);
-  if (is_certain(n_zero))
+  cnstr_t end = _EQ_(n, 0);
+  if (is_certain(end))
   {
-    return s;
-  }
-  if (is_certain(_NOT_(n_zero)))
-  {
-    allocd(s, 1);
-    cond_write(s, (symbolic) ((unsigned char) c), 1);
-    return memset_recursive(((char *) s) + 1, c, n - 1);
+    return;
   }
   push_pc();
-  assume(n_zero);
-  void *res_zero = s;
+  assume(_NOT_(end));
+  cnstr_t g = _AND_(guard, _NOT_(end));
+  cond_write(p, c, g);
+  memset_rec(p + 1, c, n - 1, g);
   pop_pc();
-  push_pc();
-  assume(_NOT_(n_zero));
-  allocd(s, 1);
-  cond_write(s, (symbolic) ((unsigned char) c), 1);
-  void *res_step = memset_recursive(((char *) s) + 1, c, n - 1);
-  pop_pc();
-  return _ITE_VAR_(n_zero, (symbolic) res_zero, (symbolic) res_zero);
 }
 
 void *memset(void *s, int c, size_t n)
 {
-  return memset_recursive(s, c, n);
+  memset_rec((unsigned char *) s, (symbolic) ((unsigned char) c), n, 1);
+  return s;
 }
 
 void test_1()
@@ -98,6 +87,7 @@ void test_1()
   size_t max_2 = MAX_NUM_1;
   assume(_ULE_(n, max_2));
   state_t initial_state = save_current_state();
+  mem_addr("s", s, ARRAY_SIZE_1);
   void * ret1 = concrete_memset(s, c, n);
   cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(void *) * 8);
   store_cnstr("cnctr_test1", cnstr1);

@@ -25,7 +25,9 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
+cnstr_t _AND_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
+cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
 void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
@@ -37,70 +39,74 @@ void push_pc(){return;}
 #define ARRAY_SIZE_1 5
 #define MAX_NUM_1 5
 
-void *concrete_memset(void *s, int c, size_t n)
+char *concrete_strncpy(char *s1, register const char *s2, size_t n)
 {
-  register unsigned char *p = (unsigned char *) s;
+  register char *s = s1;
   while (n)
   {
-    *(p++) = (unsigned char) c;
+    if ((*s = *s2) != 0)
+      s2++;
+    ++s;
     --n;
   }
 
-  return s;
+  return s1;
 }
 
-void concrete_bzero(void *s, size_t n)
-{
-  (void) concrete_memset(s, 0, n);
-}
-
-static void bzero_recurse(unsigned char *p, size_t n)
+static void strncpy_rec(char *s1, const char *s2, size_t n, cnstr_t guard)
 {
   cnstr_t n_zero = _EQ_(n, 0);
   if (is_certain(n_zero))
   {
     return;
   }
-  if (is_certain(_NOT_(n_zero)))
-  {
-    cond_write(p, 0, 1);
-    bzero_recurse(p + 1, n - 1);
-    return;
-  }
-  push_pc();
-  assume(n_zero);
-  pop_pc();
+  symbolic val = *s2;
+  cnstr_t is_null = _EQ_(val, 0);
+  cnstr_t g_write = _AND_(guard, _NOT_(n_zero));
+  cond_write(s1, val, g_write);
+  cnstr_t s2_inc_guard = _AND_(g_write, _NOT_(is_null));
+  cnstr_t s2_stay_guard = _AND_(g_write, is_null);
+  symbolic next_s2 = _ITE_VAR_(is_null, (symbolic) s2, (symbolic) (s2 + 1));
   push_pc();
   assume(_NOT_(n_zero));
-  cond_write(p, 0, 1);
-  bzero_recurse(p + 1, n - 1);
+  strncpy_rec(s1 + 1, (const char *) next_s2, n - 1, g_write);
   pop_pc();
 }
 
-void bzero(void *s, size_t n)
+char *strncpy(char *dest, const char *src, size_t n)
 {
-  bzero_recurse((unsigned char *) s, n);
+  strncpy_rec(dest, src, n, 1);
+  return dest;
 }
 
 void test_1()
 {
-  char s[ARRAY_SIZE_1];
-  for (int s_idx_1 = 0; s_idx_1 < ARRAY_SIZE_1; s_idx_1++)
+  char dest[ARRAY_SIZE_1];
+  for (int dest_idx_1 = 0; dest_idx_1 < ARRAY_SIZE_1; dest_idx_1++)
   {
-    s[s_idx_1] = sym_var_array("s", s_idx_1, sizeof(char) * 8);
+    dest[dest_idx_1] = sym_var_array("dest", dest_idx_1, sizeof(char) * 8);
   }
 
-  s[ARRAY_SIZE_1 - 1] = '\0';
+  dest[ARRAY_SIZE_1 - 1] = '\0';
+  char src[ARRAY_SIZE_1];
+  for (int src_idx_1 = 0; src_idx_1 < ARRAY_SIZE_1; src_idx_1++)
+  {
+    src[src_idx_1] = sym_var_array("src", src_idx_1, sizeof(char) * 8);
+  }
+
+  src[ARRAY_SIZE_1 - 1] = '\0';
   size_t n = sym_var_named("n", sizeof(size_t) * 8);
   size_t max_1 = MAX_NUM_1;
   assume(_ULE_(n, max_1));
   state_t initial_state = save_current_state();
-  concrete_bzero(s, n);
-  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(void) * 8);
+  mem_addr("dest", dest, ARRAY_SIZE_1);
+  mem_addr("src", src, ARRAY_SIZE_1);
+  char * ret1 = concrete_strncpy(dest, src, n);
+  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(char *) * 8);
   store_cnstr("cnctr_test1", cnstr1);
   halt_all(initial_state);
-  bzero(s, n);
-  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(void) * 8);
+  char * ret2 = strncpy(dest, src, n);
+  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(char *) * 8);
   store_cnstr("summ_test1", cnstr2);
   halt_all(NULL);
   result_t result = check_implications("cnctr_test1", "summ_test1");

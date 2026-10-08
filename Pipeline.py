@@ -120,7 +120,7 @@ def run_test(func_name: str) -> str | None:
 def insert_parameters() -> tuple[str, str, set[str]]:
     #func_name = sys.argv[1]
     #approx_mode = sys.argv[2]
-    func_name = "memcpy"
+    func_name = "strncpy"
     approx_mode = "exact"
     accepted_results = ACCEPTED_RESULTS[approx_mode]
     print(f"Generating symbolic summary for {func_name} with {approx_mode}-approximation...")

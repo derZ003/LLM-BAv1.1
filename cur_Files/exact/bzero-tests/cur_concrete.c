@@ -15,3 +15,9 @@ void concrete_bzero(void *s, size_t n)
   (void) concrete_memset(s, 0, n);
 }
 
+
+int concrete_bzero_w(void *s, size_t n)
+{
+  concrete_bzero(s, n);
+  return 0;
+}

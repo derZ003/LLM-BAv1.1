@@ -25,6 +25,9 @@ SUMMARY_OUTPUT_RULES = """
     #Output rules:
     - Output exactly ONE C code block containing only the final version; no drafts or alternatives.
     - Define {func_name} exactly once. Helper functions are allowed but must be static and have different names.
+    - If {func_name} returns void, its only observable effect is memory: every
+    byte the library writes must be written with the same value under the same
+    condition, and no other byte may change. Do not define a `{func_name}_w` wrapper.
 """
 #Rules/functions of the symbolic reflection API, shared by the summary prompts
 SYMBOLIC_API_RULES = """
@@ -114,9 +117,16 @@ SYMBOLIC_API_RULES = """
     }}
     ```
 
-    **Unconditional write.** Use a plain assignment `*p = v;` or
-    `cond_write(p, v, TRUE)`. Use `cond_write` with another constraint only when
-    the write depends on a symbolic condition.
+    **Writes are not undone by pop_pc.** `push_pc`/`assume`/`pop_pc` only change
+    the path condition; memory writes made in between stay visible on all paths.
+    The output buffer is compared byte by byte with the library's.
+    - A plain `*p = v;` or `cond_write(p, v, TRUE)` is only correct when the write
+    happens on every path, i.e. its condition is certain.
+    - A write that depends on an undecided condition must be guarded:
+    `cond_write(p, v, guard)`, where `guard` is the conjunction (`_AND_`) of
+    all undecided conditions that lead to this write.
+    - In a recursion, pass the guard as a parameter (start with `TRUE`) and extend
+    it at each undecided split: `guard = _AND_(guard, _NOT_(n_zero))`.
 
     **How primitives affect the approximation**
     - Exact: every case is kept (case split + `_ITE_VAR_`).
@@ -163,6 +173,16 @@ SYMBOLIC_API_RULES = """
     Only recurse with `n - 1` inside `assume(_NOT_(n_zero))`. Then `n` shrinks
     on every path and becomes certainly 0 after at most the input bound.
     Never read `s[i]` past a possibly reached bound (`n` or `'\\0'`).
+    The same recursion with a guarded write (e.g. filling `n` bytes with 0):
+    ```c
+    static void fill(unsigned char *p, size_t n, cnstr_t guard) {{
+        cnstr_t n_zero = _EQ_(n, 0);
+        if (is_certain(n_zero)) {{ return; }}
+        cnstr_t g = _AND_(guard, _NOT_(n_zero));
+        cond_write(p, 0, g);
+        push_pc(); assume(_NOT_(n_zero)); fill(p + 1, n - 1, g); pop_pc();
+    }}
+    ```
 
     **Input buffers have no known size.** Pointer arguments point to caller
     arrays, not `mem_alloc` blocks. Never call `n_allocd` or `mem_free` on them;
@@ -225,6 +245,10 @@ GENERAL_REV_GEN_STRING = """
     - "under-approximation": inputs where the summary returns "ret",
     but the library function never does -> the summary has a wrong behavior.
     - "Not in model": the byte is irrelevant for this counterexample.
+    - "memory" ("mem_s" -> "mem_s_0", ...) is the content of buffer `s` after the
+    call. If it differs from what the library writes for these inputs, a write is
+    missing, has the wrong value, or is not guarded (e.g. a byte is written although
+    `n` is 0 -> use `cond_write` with the guard of the path).
     - For pointer return types, "ret" is an address. If the two counterexamples
     have "ret" values that differ by a small offset, the summary returns a
     pointer advanced by the recursion instead of the pointer the library

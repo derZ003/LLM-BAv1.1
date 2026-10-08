@@ -25,10 +25,10 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
-cnstr_t _AND_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
+cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
-void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
+cnstr_t _OR_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 int is_certain(cnstr_t cnstr){return 0;}
 void pop_pc(){return;}
 void push_pc(){return;}
@@ -38,69 +38,68 @@ void push_pc(){return;}
 #define ARRAY_SIZE_1 5
 #define MAX_NUM_1 5
 
-void *concrete_memcpy(void *s1, const void *s2, size_t n)
+char *concrete_strchrnul(register const char *s, int c)
 {
-  register char *r1 = s1;
-  register const char *r2 = s2;
-  while (n)
-  {
-    *(r1++) = *(r2++);
-    --n;
-  }
+  --s;
+  while ((*(++s)) && ((*s) != ((char) c)))
+    ;
 
-  return s1;
+  return (char *) s;
 }
 
-static void memcpy_recurse(unsigned char *p1, const unsigned char *p2, size_t n, cnstr_t guard)
+static symbolic _strchrnul_recursive(const char *s, int c)
 {
-  cnstr_t n_zero = _EQ_(n, 0);
-  if (is_certain(n_zero))
+  symbolic current_char = *s;
+  cnstr_t is_null = _EQ_(current_char, '\0');
+  cnstr_t is_match = _EQ_(current_char, (char) c);
+  if (is_certain(is_null))
   {
-    return;
+    return (symbolic) s;
   }
-  cnstr_t g = _AND_(guard, _NOT_(n_zero));
-  symbolic val = *p2;
-  cond_write(p1, val, g);
+  if (is_certain(_NOT_(is_null)) && is_certain(is_match))
+  {
+    return (symbolic) s;
+  }
+  if (is_certain(_NOT_(is_null)) && is_certain(_NOT_(is_match)))
+  {
+    return _strchrnul_recursive(s + 1, c);
+  }
+  cnstr_t stop = _OR_(is_null, is_match);
   push_pc();
-  assume(_NOT_(n_zero));
-  memcpy_recurse(p1 + 1, p2 + 1, n - 1, g);
+  assume(stop);
+  symbolic res_stop = (symbolic) s;
   pop_pc();
+  push_pc();
+  assume(_NOT_(stop));
+  symbolic res_cont = _strchrnul_recursive(s + 1, c);
+  pop_pc();
+  return _ITE_VAR_(stop, res_stop, res_cont);
 }
 
-void *memcpy(void *dest, const void *src, size_t n)
+char *strchrnul(const char *s, int c)
 {
-  memcpy_recurse((unsigned char *) dest, (const unsigned char *) src, n, 1);
-  return dest;
+  return (char *) _strchrnul_recursive(s, c);
 }
 
 void test_1()
 {
-  char dest[ARRAY_SIZE_1];
-  for (int dest_idx_1 = 0; dest_idx_1 < ARRAY_SIZE_1; dest_idx_1++)
+  char s[ARRAY_SIZE_1];
+  for (int s_idx_1 = 0; s_idx_1 < ARRAY_SIZE_1; s_idx_1++)
   {
-    dest[dest_idx_1] = sym_var_array("dest", dest_idx_1, sizeof(char) * 8);
+    s[s_idx_1] = sym_var_array("s", s_idx_1, sizeof(char) * 8);
   }
 
-  dest[ARRAY_SIZE_1 - 1] = '\0';
-  char src[ARRAY_SIZE_1];
-  for (int src_idx_1 = 0; src_idx_1 < ARRAY_SIZE_1; src_idx_1++)
-  {
-    src[src_idx_1] = sym_var_array("src", src_idx_1, sizeof(char) * 8);
-  }
-
-  src[ARRAY_SIZE_1 - 1] = '\0';
-  size_t n = sym_var_named("n", sizeof(size_t) * 8);
-  size_t max_1 = MAX_NUM_1;
-  assume(_ULE_(n, max_1));
+  s[ARRAY_SIZE_1 - 1] = '\0';
+  int c = sym_var_named("c", sizeof(int) * 8);
+  int max_1 = MAX_NUM_1;
+  assume(_ULE_(c, max_1));
   state_t initial_state = save_current_state();
-  mem_addr("dest", dest, ARRAY_SIZE_1);
-  mem_addr("src", src, ARRAY_SIZE_1);
-  void * ret1 = concrete_memcpy(dest, src, n);
-  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(void *) * 8);
+  char * ret1 = concrete_strchrnul(s, c);
+  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(char *) * 8);
   store_cnstr("cnctr_test1", cnstr1);
   halt_all(initial_state);
-  void * ret2 = memcpy(dest, src, n);
-  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(void *) * 8);
+  char * ret2 = strchrnul(s, c);
+  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(char *) * 8);
   store_cnstr("summ_test1", cnstr2);
   halt_all(NULL);
   result_t result = check_implications("cnctr_test1", "summ_test1");

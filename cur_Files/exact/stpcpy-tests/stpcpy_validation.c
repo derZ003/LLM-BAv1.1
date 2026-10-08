@@ -25,10 +25,9 @@ void mem_addr(char* name, void* addr, size_t length) {return;}
 void print_counterexamples(result_t result) {return;}
 void store_cnstr(char* name, cnstr_t constraint) {return;}
 
-cnstr_t _AND_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
+cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
-void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
 int is_certain(cnstr_t cnstr){return 0;}
 void pop_pc(){return;}
 void push_pc(){return;}
@@ -38,39 +37,47 @@ void push_pc(){return;}
 #define ARRAY_SIZE_1 5
 #define MAX_NUM_1 5
 
-void *concrete_memcpy(void *s1, const void *s2, size_t n)
+char *concrete_stpcpy(register char *s1, const char *s2)
 {
-  register char *r1 = s1;
-  register const char *r2 = s2;
-  while (n)
-  {
-    *(r1++) = *(r2++);
-    --n;
-  }
+  while ((*(s1++) = *(s2++)) != 0)
+    ;
 
-  return s1;
+  return s1 - 1;
 }
 
-static void memcpy_recurse(unsigned char *p1, const unsigned char *p2, size_t n, cnstr_t guard)
+static void *stpcpy_rec(char *s1, const char *s2)
 {
-  cnstr_t n_zero = _EQ_(n, 0);
-  if (is_certain(n_zero))
+  cnstr_t is_null = _EQ_(*s2, '\0');
+  if (is_certain(is_null))
   {
-    return;
+    *s1 = *s2;
+    return s1;
   }
-  cnstr_t g = _AND_(guard, _NOT_(n_zero));
-  symbolic val = *p2;
-  cond_write(p1, val, g);
-  push_pc();
-  assume(_NOT_(n_zero));
-  memcpy_recurse(p1 + 1, p2 + 1, n - 1, g);
-  pop_pc();
+  else
+    if (is_certain(_NOT_(is_null)))
+  {
+    *s1 = *s2;
+    return stpcpy_rec(s1 + 1, s2 + 1);
+  }
+  else
+  {
+    push_pc();
+    assume(is_null);
+    *s1 = *s2;
+    void *res_null = s1;
+    pop_pc();
+    push_pc();
+    assume(_NOT_(is_null));
+    *s1 = *s2;
+    void *res_not_null = stpcpy_rec(s1 + 1, s2 + 1);
+    pop_pc();
+    return _ITE_VAR_(is_null, res_null, res_not_null);
+  }
 }
 
-void *memcpy(void *dest, const void *src, size_t n)
+char *stpcpy(char *dest, const char *src)
 {
-  memcpy_recurse((unsigned char *) dest, (const unsigned char *) src, n, 1);
-  return dest;
+  return (char *) stpcpy_rec(dest, src);
 }
 
 void test_1()
@@ -89,18 +96,13 @@ void test_1()
   }
 
   src[ARRAY_SIZE_1 - 1] = '\0';
-  size_t n = sym_var_named("n", sizeof(size_t) * 8);
-  size_t max_1 = MAX_NUM_1;
-  assume(_ULE_(n, max_1));
   state_t initial_state = save_current_state();
-  mem_addr("dest", dest, ARRAY_SIZE_1);
-  mem_addr("src", src, ARRAY_SIZE_1);
-  void * ret1 = concrete_memcpy(dest, src, n);
-  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(void *) * 8);
+  char * ret1 = concrete_stpcpy(dest, src);
+  cnstr_t cnstr1 = get_cnstr(&ret1, sizeof(char *) * 8);
   store_cnstr("cnctr_test1", cnstr1);
   halt_all(initial_state);
-  void * ret2 = memcpy(dest, src, n);
-  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(void *) * 8);
+  char * ret2 = stpcpy(dest, src);
+  cnstr_t cnstr2 = get_cnstr(&ret2, sizeof(char *) * 8);
   store_cnstr("summ_test1", cnstr2);
   halt_all(NULL);
   result_t result = check_implications("cnctr_test1", "summ_test1");

@@ -4,8 +4,10 @@ import sys
 
 from pathlib import Path
 
+from pycparser import c_ast, c_generator, c_parser
+
 from LibCCode import get_uclibc_code
-from ConcreteCode import gen_concrete_code, get_concrete_code
+from ConcreteCode import gen_concrete_code, get_concrete_code, PARSE_PRELUDE
 from SummaryGeneration import gen_symbolic_summary, gen_revision_summary
 
 BASE_PATH = "~/_Uni/BAv1.1"
@@ -61,13 +63,29 @@ def write_summary_cur_Files(summary:str) -> None:
     summ_path.write_text(header + summary)
     return
 
-def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str) -> None:
+#SBV can't test void functions -> wrap them in int functions, compared via --memory
+def void_wrappers(concrete_code: str, func_name: str) -> tuple[str, str] | None:
+    ast = c_parser.CParser().parse(PARSE_PRELUDE + concrete_code)
+    fdecl = next(n.decl.type for n in ast.ext
+                if isinstance(n, c_ast.FuncDef) and n.decl.name == f"concrete_{func_name}")
+    ret = fdecl.type
+    if not (isinstance(ret, c_ast.TypeDecl) and ret.type.names == ["void"]):
+        return None
+    params = [p for p in fdecl.args.params if not isinstance(p, c_ast.Typename)] if fdecl.args else []
+    gen = c_generator.CGenerator()
+    param_str = ", ".join(gen.visit(p) for p in params) or "void"
+    arg_str = ", ".join(p.name for p in params)
+    wrap = lambda name: f"\nint {name}_w({param_str})\n{{\n  {name}({arg_str});\n  return 0;\n}}\n"
+    return wrap(f"concrete_{func_name}"), wrap(func_name)
+
+def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str, wrapped:bool) -> None:
+    suffix = "_w" if wrapped else ""
     testgen = subprocess.run(
         [str(Path(sys.executable).parent / "summbv"),
-        "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
-        "-summ", str(summ_path), "--summname", func_name,
+        "-func", str(concrete_path), "--funcname", f"concrete_{func_name}{suffix}",
+        "-summ", str(summ_path), "--summname", f"{func_name}{suffix}",
         "-o", str(test_path), "--compile", "x86", "--lib", str(Path(__file__).parent / "lib.c"),
-        "--maxvalue", "5", *SBV_EXTRA_ARGS.get(func_name, [])],
+        "--maxvalue", "5", "-memory", *SBV_EXTRA_ARGS.get(func_name, [])],
         capture_output=True,
         text=True
     )
@@ -102,7 +120,7 @@ def run_test(func_name: str) -> str | None:
 def insert_parameters() -> tuple[str, str, set[str]]:
     #func_name = sys.argv[1]
     #approx_mode = sys.argv[2]
-    func_name = "rawmemchr"
+    func_name = "memcpy"
     approx_mode = "exact"
     accepted_results = ACCEPTED_RESULTS[approx_mode]
     print(f"Generating symbolic summary for {func_name} with {approx_mode}-approximation...")
@@ -117,16 +135,19 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
     #generating symbolic summary with LLM
     summary = gen_symbolic_summary(approx_mode, func_name, func_code)
 
+    wrappers = void_wrappers(concrete_code, func_name)
+    concrete_wrap, summ_wrap = wrappers or ("", "")
+
     #write concrete and summary to cur_Files folder
-    write_concrete_cur_Files(concrete_code)
-    write_summary_cur_Files(summary)
+    write_concrete_cur_Files(concrete_code + concrete_wrap)
+    write_summary_cur_Files(summary + summ_wrap)
 
     #generating + compiling Testfile with SummBoundVerify -> cur_Files/<func>_validation.c / .test
     test_path = CUR_DIR / f"{func_name}_validation.c"
     concrete_path = CUR_DIR / "cur_concrete.c"
     summ_path = CUR_DIR / "cur_summary.c"
 
-    gen_test(concrete_path, summ_path, test_path, func_name)
+    gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None)
     test_results = run_test(func_name)
 
     #skip regeneration of symbolic summary if the result is accepted for this approximation mode
@@ -136,9 +157,9 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
         while not results_accepted(test_results, accepted_results) and i < 3:
             print("result not accepted, regenerating symbolic summary...")
             summary = gen_revision_summary(approx_mode, func_name, func_code, summary, test_results)
-            write_summary_cur_Files(summary)
+            write_summary_cur_Files(summary + summ_wrap)
             #retesting revised summary
-            gen_test(concrete_path, summ_path, test_path, func_name)
+            gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None)
             test_results = run_test(func_name)
             if test_results is None:
                 print("No test results found after revision, stopping.")
@@ -148,7 +169,7 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
     else: 
         print("No test results found, skipping symbolic summary regeneration.")
     #return summary and counterexamples
-    write_summary_cur_Files(summary)
+    write_summary_cur_Files(summary + summ_wrap)
     print("Final symbolic summary:\n" + summary)
     if test_results is not None:
         print("Final test results:\n" + test_results)

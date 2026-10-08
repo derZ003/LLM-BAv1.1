@@ -1,3 +1,6 @@
+#define __USE_GNU
+#define __USE_BSD
+#define __UCLIBC_SUSV3_LEGACY__
 #define libc_hidden_def(x)
 #define libc_hidden_weak(x)
 #define libc_hidden_proto(x)

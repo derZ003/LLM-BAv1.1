@@ -116,6 +116,8 @@ def collect_uclibc_functions(func_name: str, defined: set | None = None) -> tupl
 
 def get_concrete_code(func_name: str) -> str:
     nodes, defined = collect_uclibc_functions(func_name)
+    if not any(isinstance(n, c_ast.FuncDef) and n.decl.name == func_name for n in nodes):
+        raise RuntimeError(f"{func_name} not defined after preprocessing {get_uclibc_codepath(func_name)}")
     ast = c_ast.FileAST(nodes)
     Renamer(defined).visit(ast)
     gen = c_generator.CGenerator()

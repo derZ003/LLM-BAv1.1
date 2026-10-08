@@ -18,7 +18,17 @@ ACCEPTED_RESULTS = {
     "over": {"over-approximation", "exact"},
     "under": {"under-approximation", "exact"},
 }
+#extra arguments to ensure SBV terminates
+SBV_EXTRA_ARGS = {
+    "rawmemchr": ["--defaultvalues", "{2:0}"],
+}
 
+#Checks every result inside .json is correct/acceptable -> result-types: "exact", "under-approximation", "over-approximation" or "bug"
+def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
+    if test_results == TIMEOUT_MSG:
+        return False
+    tests = json.loads(test_results)
+    return len(tests) > 0 and all(t["result"] in accepted_results for t in tests.values())
 #categrorizes test results
 def result_category(test_results: str | None) -> str:
     if test_results is None:
@@ -57,7 +67,7 @@ def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str) 
         "-func", str(concrete_path), "--funcname", f"concrete_{func_name}",
         "-summ", str(summ_path), "--summname", func_name,
         "-o", str(test_path), "--compile", "x86", "--lib", str(Path(__file__).parent / "lib.c"),
-        "--maxvalue", "5"],
+        "--maxvalue", "5", *SBV_EXTRA_ARGS.get(func_name, [])],
         capture_output=True,
         text=True
     )
@@ -89,17 +99,10 @@ def run_test(func_name: str) -> str | None:
         return TIMEOUT_MSG
     return None
 
-#Checks every result inside .json is correct/acceptable -> result-types: "exact", "under-approximation", "over-approximation" or "bug"
-def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
-    if test_results == TIMEOUT_MSG:
-        return False
-    tests = json.loads(test_results)
-    return len(tests) > 0 and all(t["result"] in accepted_results for t in tests.values())
-
 def insert_parameters() -> tuple[str, str, set[str]]:
     #func_name = sys.argv[1]
     #approx_mode = sys.argv[2]
-    func_name = "strcpy"
+    func_name = "rawmemchr"
     approx_mode = "exact"
     accepted_results = ACCEPTED_RESULTS[approx_mode]
     print(f"Generating symbolic summary for {func_name} with {approx_mode}-approximation...")

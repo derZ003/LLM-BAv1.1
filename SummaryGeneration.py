@@ -164,6 +164,16 @@ SYMBOLIC_API_RULES = """
     on every path and becomes certainly 0 after at most the input bound.
     Never read `s[i]` past a possibly reached bound (`n` or `'\\0'`).
 
+    **Input buffers have no known size.** Pointer arguments point to caller
+    arrays, not `mem_alloc` blocks. Never call `n_allocd` or `mem_free` on them;
+    use these only on pointers you got from `mem_alloc` yourself.
+
+    **Scans without a length or terminator** (e.g. rawmemchr: the library assumes
+    the byte occurs). The only bound is the searched byte itself. Do not invent a
+    length, and do not stop at `'\\0'`. At each byte, case split on
+    `found = _EQ_(*s, c)`: return `s` under `assume(found)`, and recurse on `s + 1`
+    only inside `assume(_NOT_(found))`. Merge both with `_ITE_VAR_`.
+
     **Termination check.** Before answering, check every recursion and loop:
     on each path it must reach a base case whose condition becomes *certain*
     (via `assume` on that path). A base case that is only ever tested with

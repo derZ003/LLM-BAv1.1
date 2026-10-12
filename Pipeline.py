@@ -17,6 +17,13 @@ TEST_TIMEOUT = 120
 TIMEOUT_MSG = (f"The symbolic execution of the summary did not terminate within {TEST_TIMEOUT} seconds")
 COMPILE_ERROR_MSG = "The summary does not compile. Compiler errors:\n"
 RUNTIME_ERROR_MSG = "The symbolic execution of the summary aborted with an error:\n"
+RULE_ERROR_MSG = "The summary violates an API rule (checked before testing):\n"
+#faults SBV cannot detect (e.g. writes to address 0 are not compared) -> checked statically on the summary
+SUMMARY_RULES = [
+    (re.compile(r"[(,]\s*\(\s*(?:const\s+)?(?:(?:un)?signed\s+)?char\s*\*\s*\)\s*(?:0|NULL)\s*[,)]"),
+     "A buffer pointer is replaced by a null pointer (`(char *)0` passed as an argument). "
+     "For \"no visible writes\" pass the original pointer with guard `FALSE`."),
+]
 RUNTIME_ERROR_HINTS = {
     "UnsatConstraintError": "An `assume(c)` was called with a condition `c` that is impossible on the current path. "
                             "Only assume a condition in the undecided branch of its own case split.",
@@ -39,7 +46,7 @@ SBV_EXTRA_ARGS = {
 
 #Checks every result inside .json is correct/acceptable -> result-types: "exact", "under-approximation", "over-approximation" or "bug"
 def results_accepted(test_results: str, accepted_results: set[str]) -> bool:
-    if test_results == TIMEOUT_MSG or test_results.startswith((COMPILE_ERROR_MSG, RUNTIME_ERROR_MSG)):
+    if test_results == TIMEOUT_MSG or test_results.startswith((COMPILE_ERROR_MSG, RUNTIME_ERROR_MSG, RULE_ERROR_MSG)):
         return False
     tests = json.loads(test_results)
     return len(tests) > 0 and all(t["result"] in accepted_results for t in tests.values())
@@ -91,6 +98,15 @@ def void_wrappers(concrete_code: str, func_name: str) -> tuple[str, str] | None:
     return wrap(f"concrete_{func_name}"), wrap(func_name)
 
 #returns the gcc errors (with source line) if the validation test does not compile, else None
+#returns the violated rules (with the offending lines) if the summary breaks a SUMMARY_RULES rule, else None
+def check_summary_rules(summary: str) -> str | None:
+    violations = []
+    for pattern, msg in SUMMARY_RULES:
+        lines = [line.strip() for line in summary.splitlines() if pattern.search(line)]
+        if lines:
+            violations.append(msg + "\n" + "\n".join(lines))
+    return RULE_ERROR_MSG + "\n\n".join(violations) if violations else None
+
 def gen_test(concrete_path:Path, summ_path:Path, test_path:Path, func_name:str, wrapped:bool) -> str | None:
     print("Generating validation test...")
     test_path.with_suffix(".test").unlink(missing_ok=True)
@@ -180,7 +196,7 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
     concrete_path = CUR_DIR / "cur_concrete.c"
     summ_path = CUR_DIR / "cur_summary.c"
 
-    test_results = gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None) or run_test(func_name)
+    test_results = check_summary_rules(summary) or gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None) or run_test(func_name)
 
     #skip regeneration of symbolic summary if the result is accepted for this approximation mode
     if test_results is not None:
@@ -191,7 +207,7 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
             summary = gen_revision_summary(approx_mode, func_name, func_code, summary, test_results)
             write_summary_cur_Files(summary + summ_wrap)
             #retesting revised summary
-            test_results = gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None) or run_test(func_name)
+            test_results = check_summary_rules(summary) or gen_test(concrete_path, summ_path, test_path, func_name, wrappers is not None) or run_test(func_name)
             if test_results is None:
                 print("No test results exist after revision, stopping.")
                 break

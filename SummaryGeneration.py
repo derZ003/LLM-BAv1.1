@@ -602,6 +602,8 @@ GENERAL_REV_GEN_STRING = """
     counterexamples: fix only the reported compiler errors and keep the logic.
     The shown source line identifies the faulty statement; the line numbers refer
     to the generated test file, not to the summary.
+    - If the test results start with "The summary violates an API rule", the
+    summary was not tested: fix the listed lines as described and keep the logic.
 
 """
 def gen_symbolic_summary(approx_mode: str, func_name:str, libc_code:str) -> str: 

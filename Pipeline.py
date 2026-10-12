@@ -12,7 +12,7 @@ from ConcreteCode import gen_concrete_code, get_concrete_code, PARSE_PRELUDE
 from SummaryGeneration import gen_symbolic_summary, gen_revision_summary
 
 BASE_PATH = "~/_Uni/BAv1.1"
-CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files"
+CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files" / "121026prompt-generalization"
 TEST_TIMEOUT = 120
 TIMEOUT_MSG = (f"The symbolic execution of the summary did not terminate within {TEST_TIMEOUT} seconds")
 COMPILE_ERROR_MSG = "The summary does not compile. Compiler errors:\n"
@@ -22,6 +22,8 @@ RUNTIME_ERROR_HINTS = {
                             "Only assume a condition in the undecided branch of its own case split.",
     "MemoryPermissionsError": "The summary accessed memory outside the input buffers (e.g. read past a possibly reached end).",
     "DuplicateSymbolicVariableError": "`sym_var_named` was called twice with the same name; names must be unique.",
+    "IndexError": "A constraint argument (e.g. `cond` of `_ITE_VAR_`/`_ITE_`, or an argument of `_AND_`/`_NOT_`/`assume`) "
+                  "is a symbolic value or pointer instead of a `cnstr_t`. Build the condition with `_EQ_`/`_NEQ_`/... first.",
 }
 #accepted result types per approximation mode, exact also accepted for over- and under-approximation
 ACCEPTED_RESULTS = {
@@ -32,6 +34,7 @@ ACCEPTED_RESULTS = {
 #extra arguments to ensure SBV terminates
 SBV_EXTRA_ARGS = {
     "rawmemchr": ["--defaultvalues", "{2:0}"],
+    "strncasecmp": ["--arraysize", "4"],
 }
 
 #Checks every result inside .json is correct/acceptable -> result-types: "exact", "under-approximation", "over-approximation" or "bug"
@@ -139,6 +142,8 @@ def run_test(func_name: str) -> str | None:
         return TIMEOUT_MSG
     #runtime errors of SBV (e.g. UnsatConstraintError) are passed to the revision like compile errors
     errors = re.findall(r"summboundverify\.exceptions\.exceptions\.(\w+): (.*)", output)
+    #other Python exceptions inside SBV (e.g. IndexError from a non-constraint passed to _ITE_VAR_)
+    errors = errors or re.findall(r"^(\w+(?:Error|Exception)): (.*)$", output, re.M)
     if errors:
         name, msg = errors[-1]
         print(f"Testing aborted: {name}")
@@ -148,7 +153,7 @@ def run_test(func_name: str) -> str | None:
 def insert_parameters() -> tuple[str, str, set[str]]:
     #func_name = sys.argv[1]
     #approx_mode = sys.argv[2]
-    func_name = "strlcpy"
+    func_name = "strncasecmp"
     approx_mode = "exact"
     accepted_results = ACCEPTED_RESULTS[approx_mode]
     print(f"Generating symbolic summary for {func_name} with {approx_mode}-approximation...")
@@ -207,5 +212,7 @@ def pipeline(func_name: str, approx_mode: str, accepted_results: set[str]) -> No
 
 if __name__ == "__main__":
     func_name, approx_mode, accepted_results = insert_parameters()
-    pipeline(func_name, approx_mode, accepted_results)
+    for i in range(1):
+        print("####### Pipeline run " + str(i + 1) + " #######")
+        pipeline(func_name, approx_mode, accepted_results)
 

@@ -27,7 +27,6 @@ void store_cnstr(char* name, cnstr_t constraint) {return;}
 
 cnstr_t _AND_(cnstr_t cnstr1, cnstr_t cnstr2) {return 0;}
 cnstr_t _EQ_(symbolic var1, symbolic var2) {return 0;}
-cnstr_t _GT_(symbolic var1, symbolic var2) {return 0;}
 cnstr_t _ITE_VAR_(cnstr_t cnstr1, symbolic var1, symbolic var2) {return 0;}
 cnstr_t _NOT_(cnstr_t cnstr) {return 0;}
 void cond_write(void* ptr, symbolic c, cnstr_t pc) {return;}
@@ -68,92 +67,62 @@ size_t concrete_strlcpy(register char *dst, register const char *src, size_t n)
 static symbolic strlcpy_rec(char *dst, const char *src, size_t n, cnstr_t guard)
 {
   symbolic c = (symbolic) ((unsigned long) (*((const unsigned char *) src)));
-  cnstr_t end = _EQ_(c, 0);
+  cnstr_t is_null = _EQ_(c, 0);
   cond_write(dst, c, guard);
-  if (is_certain(end))
+  if (is_certain(is_null))
   {
     return (symbolic) 0;
   }
   push_pc();
-  assume(_NOT_(end));
-  cnstr_t g = _AND_(guard, _NOT_(end));
+  assume(_NOT_(is_null));
+  cnstr_t g = _AND_(guard, _NOT_(is_null));
   symbolic res;
-  if (is_certain(_EQ_(n, 0)))
-  {
-    res = (symbolic) 1;
-    push_pc();
-    assume(_NOT_(end));
-    pop_pc();
-  }
-  pop_pc();
-  return res;
-}
-
-static symbolic strlcpy_step(char *dst, const char *src, size_t n, cnstr_t guard)
-{
-  symbolic c = (symbolic) ((unsigned long) (*((const unsigned char *) src)));
-  cnstr_t end = _EQ_(c, 0);
-  cond_write(dst, c, guard);
-  if (is_certain(end))
-  {
-    return (symbolic) 0;
-  }
-  push_pc();
-  assume(_NOT_(end));
-  cnstr_t g = _AND_(guard, _NOT_(end));
-  symbolic next_len;
-  cnstr_t n_pos = _GT_(n, 0);
-  if (is_certain(n_pos))
-  {
-    next_len = (symbolic) (((unsigned long) 1) + ((unsigned long) strlcpy_step(dst + 1, src + 1, n - 1, g)));
-  }
-  else
-    if (is_certain(_NOT_(n_pos)))
-  {
-    next_len = (symbolic) (((unsigned long) 1) + ((unsigned long) strlcpy_step(dst, src + 1, n, g)));
-  }
-  else
-  {
-    push_pc();
-    assume(n_pos);
-    symbolic a = (symbolic) (((unsigned long) 1) + ((unsigned long) strlcpy_step(dst + 1, src + 1, n - 1, _AND_(g, n_pos))));
-    pop_pc();
-    push_pc();
-    assume(_NOT_(n_pos));
-    symbolic b = (symbolic) (((unsigned long) 1) + ((unsigned long) strlcpy_step(dst, src + 1, n, _AND_(g, _NOT_(n_pos)))));
-    pop_pc();
-    next_len = _ITE_VAR_(n_pos, a, b);
-  }
-  pop_pc();
-  return _ITE_VAR_(end, (symbolic) 0, next_len);
-}
-
-size_t strlcpy(char *dst, const char *src, size_t n)
-{
   cnstr_t n_zero = _EQ_(n, 0);
-  symbolic res;
   if (is_certain(n_zero))
   {
-    res = (symbolic) strlcpy_step((char *) 0, src, 0, 1);
+    res = (symbolic) (((unsigned long) 1) + ((unsigned long) strlcpy_rec(dst, src + 1, n, g)));
   }
   else
     if (is_certain(_NOT_(n_zero)))
   {
-    res = (symbolic) strlcpy_step(dst, src, n - 1, 1);
+    res = (symbolic) (((unsigned long) 1) + ((unsigned long) strlcpy_rec(dst + 1, src + 1, n - 1, g)));
   }
   else
   {
     push_pc();
     assume(n_zero);
-    symbolic a = (symbolic) strlcpy_step((char *) 0, src, 0, n_zero);
+    symbolic res_zero = (symbolic) (((unsigned long) 1) + ((unsigned long) strlcpy_rec(dst, src + 1, n, g)));
     pop_pc();
     push_pc();
     assume(_NOT_(n_zero));
-    symbolic b = (symbolic) strlcpy_step(dst, src, n - 1, _NOT_(n_zero));
+    symbolic res_nonzero = (symbolic) (((unsigned long) 1) + ((unsigned long) strlcpy_rec(dst + 1, src + 1, n - 1, g)));
     pop_pc();
-    res = _ITE_VAR_(n_zero, a, b);
+    res = _ITE_VAR_(n_zero, res_zero, res_nonzero);
   }
-  return (size_t) ((unsigned long) res);
+  pop_pc();
+  return _ITE_VAR_(is_null, (symbolic) 0, res);
+}
+
+size_t strlcpy(char *dst, const char *src, size_t n)
+{
+  cnstr_t n_zero = _EQ_(n, 0);
+  if (is_certain(n_zero))
+  {
+    return (size_t) strlcpy_rec((char *) 0, src, 0, 1);
+  }
+  if (is_certain(_NOT_(n_zero)))
+  {
+    return (size_t) strlcpy_rec(dst, src, n - 1, 1);
+  }
+  push_pc();
+  assume(n_zero);
+  symbolic res_zero = strlcpy_rec((char *) 0, src, 0, n_zero);
+  pop_pc();
+  push_pc();
+  assume(_NOT_(n_zero));
+  symbolic res_nonzero = strlcpy_rec(dst, src, n - 1, _NOT_(n_zero));
+  pop_pc();
+  return (size_t) _ITE_VAR_(n_zero, res_zero, res_nonzero);
 }
 
 void test_1()

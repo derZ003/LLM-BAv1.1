@@ -17,7 +17,10 @@ CUR_DIR = Path(BASE_PATH).expanduser() / "cur_Files"
 llm = ChatOpenAI(
     model= "google/gemma-4-31B-it",
     base_url= "https://morpheus.cit.tum.de/api/v1",
-    api_key= MORPHEUS_API_KEY
+    api_key= MORPHEUS_API_KEY,
+    timeout= 300,
+    max_retries= 2,
+    max_tokens= 8192
 )
 
 #Output rules shared by the summary prompts
@@ -87,12 +90,17 @@ SYMBOLIC_API_RULES = """
     | `void report_error(const char *file, unsigned int line, const char *msg)` | reports an error, does not return |
 
     ### 3. Constraint constructors (all return `cnstr_t`)
-    - Logic: `_NOT_(c)`, `_AND_(c1, c2)`, `_OR_(c1, c2)`
+    - Logic: `_NOT_(c)`, `_AND_(c1, c2)`, `_OR_(c1, c2)`. `_AND_`/`_OR_` take
+    exactly two constraints; nest them for more: `_AND_(_AND_(a, b), c)`
     - Signed comparison: `_EQ_(a, b)`, `_NEQ_(a, b)`, `_LT_`, `_LE_`, `_GT_`, `_GE_`
     - Unsigned comparison: `_ULT_`, `_ULE_`, `_UGT_`, `_UGE_`
     - If-then-else over constraints: `_ITE_(cond, c1, c2)`
     - If-then-else over values: `_ITE_VAR_(cond, v1, v2)` returns the symbolic
     value `cond ? v1 : v2`
+    - `cond` of `_ITE_VAR_`/`_ITE_` and every argument of `_NOT_`/`_AND_`/`_OR_`/
+    `assume`/`is_certain` must be a `cnstr_t` built by these constructors, never a
+    symbolic value or pointer: write `_ITE_VAR_(_NEQ_(v, 0), a, b)`, not
+    `_ITE_VAR_(v, a, b)`.
     - Constants: `TRUE` (always holds), `FALSE` (never holds). These are the only
     predefined constraints; do not invent others.
 
@@ -241,6 +249,13 @@ SYMBOLIC_API_RULES = """
     returns the saved original parameter.
     - Value that depends on where the recursion stops (e.g. strlen, strchr):
     merge the results with `_ITE_VAR_` (Rule 2).
+    - Failure value (e.g. memchr, memccpy: `NULL` if the byte is not found):
+    return it as END from the base case and pass it up UNCHANGED. The recursion
+    returns the final pointer itself (memccpy: `d + 1` on a match, plain
+    `r = next;` otherwise, without any NULL check), not a step count, and never
+    does arithmetic on a result that may be the failure value (`next + 1` turns
+    `0` into `1`). Never decide "not found"
+    afterwards by comparing the result (e.g. `ret == s1 + n` or `k != 0`).
     - Writes AND such a value (e.g. stpcpy, stpncpy, mempcpy): ONE recursion that
     writes with the guard and returns the merged result. Never walk a buffer a
     second time just for the result.
@@ -262,6 +277,270 @@ SYMBOLIC_API_RULES = """
     - every `TRUE` passed as a guard: it is only allowed outside of every
     `push_pc(); assume(...); ... pop_pc();` block. Inside such a block (also in
     {func_name}) pass the assumed condition instead, e.g. `_NOT_(n_zero)`.
+
+"""
+#Generalized SYMBOLIC_API_RULES without libc function names (avoids test-set contamination)
+#Removed libc-function names -> more general
+NEW_SYMBOLIC_API_RULES = """
+    #Rules of the API:
+    ## Symbolic Reflection API
+
+    You write a symbolic summary: a C function with the same signature as the
+    libc function it models. The summary is executed by a symbolic execution
+    engine. Its inputs may hold symbolic values. The functions below let the code
+    inspect and manipulate the symbolic state.
+
+    ### Execution model
+    - Ordinary C arithmetic on symbolic values is allowed. It yields a symbolic
+    expression (e.g. `n = len + 1`).
+    - A C `if`/`while` whose condition depends on a symbolic value forks the
+    execution into several paths. Use the case split (Rule 1) instead.
+    - Constraints (`cnstr_t`) are opaque handles, not booleans. Never combine or
+    test them with `!`, `&&`, `||`, `==` or `if (c)`. Use the constructors below,
+    and query them with `is_certain` / `is_sat`.
+    - Sizes of symbolic variables are given in bits (char = 8, int = 32, 32-bit
+    target).
+
+    ### Types
+    - `symbolic` = `void *` (a symbolic value), `cnstr_t` (constraint handle),
+    `list_t` (a symbolic byte list), `size_t` = `unsigned int`, `ssize_t` = `int`.
+    - Read a byte only via its char type:
+    `symbolic c = (symbolic)(unsigned long)*(const unsigned char *)p;`
+    Never dereference a `symbolic *` (`*(symbolic *)p` reads 4 bytes, not 1).
+    - Never use a `symbolic` directly in pointer arithmetic (`p + sym` is a
+    compile error). Add a symbolic offset with a cast, `p + (unsigned long)k`,
+    or merge whole pointers and cast the result:
+    `return (char *)_ITE_VAR_(c, (symbolic)p1, (symbolic)p2);`
+    - Lengths and counters returned as `symbolic` are also `void *`: never write
+    `1 + r`, `(symbolic)1 + r` or `r1 - r2`. Compute in `unsigned long` and cast back:
+    `symbolic k = (symbolic)((unsigned long)r + 1);`
+    - The API functions need no `#include`. The summary file is compiled together
+    with the API.
+
+    ### 1. Symbolic values
+    | Function | Meaning |
+    |---|---|
+    | `symbolic sym_var(size_t bits)` | fresh unconstrained symbolic value |
+    | `symbolic sym_var_named(char *name, size_t bits)` | same, with a given name |
+    | `symbolic sym_var_array(char *name, size_t index, size_t bits)` | fresh value for cell `name[index]` |
+    | `int is_symbolic(symbolic v)` | 1 if `v` is symbolic, else 0 |
+    | `long maximize(symbolic v)` | largest value `v` may take |
+    | `long minimize(symbolic v)` | smallest value `v` may take |
+
+    ### 2. Path condition and solver
+    | Function | Meaning |
+    |---|---|
+    | `int is_certain(cnstr_t c)` | 1 if the path condition implies `c` (true on every path) |
+    | `int is_sat(cnstr_t c)` | 1 if `c` can hold together with the path condition |
+    | `void assume(cnstr_t c)` | adds `c` to the path condition (drops the executions where `c` is false) |
+    | `void assert(cnstr_t c)` | fails if the path condition does not imply `c` |
+    | `void push_pc(void)` | saves the current path condition |
+    | `void pop_pc(void)` | restores the last saved path condition |
+    | `void report_error(const char *file, unsigned int line, const char *msg)` | reports an error, does not return |
+
+    ### 3. Constraint constructors (all return `cnstr_t`)
+    - Logic: `_NOT_(c)`, `_AND_(c1, c2)`, `_OR_(c1, c2)`. `_AND_`/`_OR_` take
+    exactly two constraints; nest them for more: `_AND_(_AND_(a, b), c)`
+    - Signed comparison: `_EQ_(a, b)`, `_NEQ_(a, b)`, `_LT_`, `_LE_`, `_GT_`, `_GE_`
+    - Unsigned comparison: `_ULT_`, `_ULE_`, `_UGT_`, `_UGE_`
+    - If-then-else over constraints: `_ITE_(cond, c1, c2)`
+    - If-then-else over values: `_ITE_VAR_(cond, v1, v2)` returns the symbolic
+    value `cond ? v1 : v2`
+    - `cond` of `_ITE_VAR_`/`_ITE_` and every argument of `_NOT_`/`_AND_`/`_OR_`/
+    `assume`/`is_certain` must be a `cnstr_t` built by these constructors, never a
+    symbolic value or pointer: write `_ITE_VAR_(_NEQ_(v, 0), a, b)`, not
+    `_ITE_VAR_(v, a, b)`.
+    - Constants: `TRUE` (always holds), `FALSE` (never holds). These are the only
+    predefined constraints; do not invent others.
+
+    ### 4. Memory
+    | Function | Meaning |
+    |---|---|
+    | `void *mem_alloc(size_t nbytes)` | allocates a heap block (a symbolic size is maximized) |
+    | `void mem_free(void *p)` | frees a block returned by `mem_alloc` |
+    | `size_t n_allocd(void *p)` | size of a block returned by `mem_alloc` |
+    | `void allocd(void *p, size_t n)` | fails unless bytes `p .. p+n` are readable and writable |
+    | `void cond_write(void *p, symbolic v, cnstr_t pc)` | writes `pc ? v : old` to `*p`; a symbolic `p` writes to every address it may denote |
+
+    Pointer arguments point to caller arrays, not `mem_alloc` blocks; their size
+    is unknown. Never call `n_allocd` or `mem_free` on them.
+
+    ### 5. Symbolic lists (for memory segments of symbolic length)
+    `list_t lst_mk(void)` (empty), `list_t lst_cons(symbolic v, list_t l)`,
+    `symbolic lst_hd(list_t l)`, `list_t lst_tl(list_t l)`,
+    `cnstr_t lst_empty(list_t l)`, `size_t lst_len(list_t l)`,
+    `list_t lst_nbytes(char c, size_t n)`, `list_t lst_zeros(size_t n)`
+
+    ### How primitives affect the approximation
+    - Exact: every case is kept (case split + `_ITE_VAR_`).
+    - Under-approximation: `assume` keeps only some executions. Examples: assume
+    one branch only, or concretize with `v = maximize(x); assume(_EQ_(x, v));`.
+    - Over-approximation: return a fresh `sym_var(bits)`, possibly constrained by
+    `assume` to a range that contains every real result.
+
+    ### Rule 1: Case split on every symbolic condition
+    A condition `c` that depends on a symbolic value has three cases: certainly
+    true, certainly false and undecided. Handle all three; this checks `c`
+    without forking and merges both branches into one path:
+    ```c
+    symbolic r;
+    if (is_certain(c))            {{ r = A; }}
+    else if (is_certain(_NOT_(c))) {{ r = B; }}
+    else {{
+    push_pc(); assume(c);        symbolic a = A; pop_pc();
+    push_pc(); assume(_NOT_(c)); symbolic b = B; pop_pc();
+    r = _ITE_VAR_(c, a, b);
+    }}
+    ```
+    A two-way `if (is_certain(c)) A else B` is wrong in an exact summary: when `c`
+    is only possible, it silently executes B for inputs where A is correct.
+    This applies to nested conditions too: after `assume(c1)`, a second
+    condition `c2` is usually still undecided and needs its own case split.
+    `assume(c)` aborts the test if `c` is impossible on the current path. Only
+    `assume` a condition in the undecided branch of its own case split; never
+    `assume` two conditions in a row without checking the second one.
+
+    ### Rule 2: Recursion
+    Model loops as recursion. Each step has an end condition `end`:
+    - String terminator: `end = _EQ_(c, 0)`, with `c` the current byte.
+    - Length bound: `end = _EQ_(n, 0)`. A size parameter (`n`, `len`, `count`, ...)
+    is usually symbolic, so `is_certain(end)` alone never becomes true.
+    - Scan without length or terminator (the library assumes the searched value
+    occurs): the search condition itself is the end condition. Do not invent a
+    length and do not stop at `'\\0'`.
+    A function may have several end conditions (e.g. `n == 0` and `'\\0'`). Nest
+    them in the library's order: test the second only inside the assume block of
+    the first (e.g. a bounded search: the match test only inside `n != 0`).
+    Only a condition that stops the library's loop is an end condition; others
+    (e.g. a terminator that only stops advancing the source while writing
+    continues) are ordinary case splits inside the step. Both branches of such a
+    split still recurse: a branch whose result stops changing still has to do the
+    remaining writes until an end condition holds.
+
+    Write EVERY recursive helper with this skeleton. `assume(_NOT_(end))` appears
+    exactly once, directly after the base case, and wraps the whole rest of the step:
+    ```c
+    static symbolic rec(char *d, const char *s, size_t n, cnstr_t guard) {{
+        cnstr_t end = _EQ_(n, 0);
+        if (is_certain(end)) {{ return END; }}
+        push_pc(); assume(_NOT_(end));        /* from here on n != 0 on every path */
+        cnstr_t g = _AND_(guard, _NOT_(end));
+        /* read the byte, case splits (Rule 1), guarded writes (Rule 3),
+           recursive calls with s + 1 and n - 1 */
+        symbolic r = ...;
+        pop_pc();
+        return _ITE_VAR_(end, END, r);
+    }}
+    ```
+    - All reads of the current byte and all calls with `n - 1` (recursion or
+    another helper) belong inside this block. Never add separate
+    `assume(_NOT_(end))` calls to single branches instead. `n - 1` on a path where
+    `n == 0` is possible wraps to 4294967295 and never terminates.
+    - The skeleton needs no separate `is_certain(_NOT_(end))` case: if `end` is
+    certainly false, the `assume` changes nothing and `_ITE_VAR_` yields `r`.
+    - If the library writes before it tests the end condition (e.g.
+    `while ((*d = *s) != 0)` also copies the terminator), do this
+    write with the incoming guard BEFORE the base case, so it happens in the end
+    step too: `cond_write(d, c, guard); if (is_certain(end)) {{ return END; }}`
+    - The undecided end case occurs at EVERY recursion depth (`n - k` and the bytes
+    are symbolic), so every helper that returns a value ends with
+    `return _ITE_VAR_(end, END, r);`. A `void` helper simply ends with `pop_pc();`;
+    its guarded writes cover the end case (Rule 3).
+    - On each path a recursion must reach a base case whose condition becomes
+    *certain* via `assume` on that path. A base case that is only tested with
+    `is_certain`, without such an `assume`, does not terminate.
+
+    ### Rule 3: Writes
+    `push_pc`/`assume`/`pop_pc` only change the path condition; memory writes
+    made in between stay visible on all paths. Output buffers are compared byte
+    by byte with the library's: every byte the library writes must be written
+    with the same value under the same condition, and no other byte may change.
+    - A plain `*p = v;` or `cond_write(p, v, TRUE)` is only correct when the write
+    happens on every path, i.e. its condition is certain.
+    - A write that depends on undecided conditions must be guarded:
+    `cond_write(p, v, guard)`, where `guard` is the conjunction (`_AND_`) of all
+    undecided conditions that lead to this write.
+    - In a recursion, pass the guard as a parameter (start with `TRUE` only when
+    the call is not inside an `assume` block) and extend it at each step:
+    `g = _AND_(guard, _NOT_(end))`.
+    - Every case split inside a step also extends the guard: writes in the
+    `assume(c)` branch use `_AND_(g, c)`, writes in the `assume(_NOT_(c))` branch
+    use `_AND_(g, _NOT_(c))` (e.g. a byte decides whether the source pointer advances).
+    This includes recursive calls: the callee's writes belong to the branch, so
+    the guard passed to a call inside `assume(c)` must contain `c`. Example, a
+    pointer `p` that advances only while `k != 0`:
+    ```c
+    cnstr_t stay = _EQ_(k, 0);
+    ...
+    else {{
+        push_pc(); assume(stay);        a = rec(p,     s + 1, k,     _AND_(g, stay));        pop_pc();
+        push_pc(); assume(_NOT_(stay)); b = rec(p + 1, s + 1, k - 1, _AND_(g, _NOT_(stay))); pop_pc();
+        r = _ITE_VAR_(stay, a, b);
+    }}
+    ```
+    Passing the same `g` to both calls lets each branch overwrite the other's bytes.
+    - This also holds outside recursion, e.g. in {func_name} itself: a call made
+    inside `push_pc(); assume(c); ... pop_pc();` must receive `c` (conjoined with the
+    current guard) as its guard, never `TRUE`. Example:
+    `push_pc(); assume(_NOT_(n_zero)); r = rec(d, s, n - 1, _NOT_(n_zero)); pop_pc();`
+    - Model pointer updates literally: a pointer the library advances only under
+    a condition stays the SAME pointer when the condition fails; later writes
+    overwrite that byte. Never replace a buffer pointer by `(char *)0`.
+    A library-local scratch buffer used to discard writes means "no visible
+    writes": pass the original pointer with guard `FALSE`.
+    Example, filling `n` bytes with 0 (Rule 2 skeleton as a `void` helper):
+    ```c
+    static void fill(unsigned char *p, size_t n, cnstr_t guard) {{
+        cnstr_t end = _EQ_(n, 0);
+        if (is_certain(end)) {{ return; }}
+        push_pc(); assume(_NOT_(end));
+        cnstr_t g = _AND_(guard, _NOT_(end));
+        cond_write(p, 0, g);
+        fill(p + 1, n - 1, g);
+        pop_pc();
+    }}
+    ```
+
+    ### Rule 4: Return value
+    Return exactly what the library returns: check its `return` statement and
+    which buffer the returned pointer points into. The recursion advances its
+    pointers, so the pointer reached at the base case is NOT the original argument.
+    - Unchanged parameter (the library returns its destination argument as is):
+    the recursive helper only does the work (returns `void`), and {func_name}
+    returns the saved original parameter.
+    - Value that depends on where the recursion stops (e.g. a length or the
+    position of a match):
+    merge the results with `_ITE_VAR_` (Rule 2).
+    - Failure value (`NULL`/`-1` when the search fails): return it as END from
+    the base case and pass it up UNCHANGED: on a hit, return the value the
+    library returns at that point; otherwise plain `r = next;`, without any check.
+    Never do arithmetic on a result that may be the failure value, and never
+    decide "failed" afterwards by comparing the result with a pointer or count.
+    - Writes AND such a value (e.g. returning the end of the written data): ONE
+    recursion that
+    writes with the guard and returns the merged result. Never walk a buffer a
+    second time just for the result.
+    - If the library computes the result from pointers into another buffer
+    (e.g. `return a + (b - start);` points into `a`), let the recursion return the
+    number of steps `k` and build the result in {func_name} with the library's
+    expression (`a + k`).
+    - Comparison functions: return the library's
+    exact expression (e.g. the byte difference `c1 - c2`), not -1/0/1. Also at
+    the terminator the result is computed from the bytes (`*s1 == 0` -> `0 - c2`).
+
+    ### Self-check
+    Before answering, check EVERY helper and EVERY branch:
+    - each recursive helper follows the Rule 2 skeleton: ONE `assume(_NOT_(end))`
+    block directly after the base case, every byte read and every call with
+    `n - 1` inside it, and (if it returns a value) `return _ITE_VAR_(end, END, r);`
+    at the end;
+    - each write uses the guard including the current branch condition;
+    - each recursive call inside `assume(c)` receives a guard that contains `c`;
+    - every `TRUE` passed as a guard: it is only allowed outside of every
+    `push_pc(); assume(...); ... pop_pc();` block. Inside such a block (also in
+    {func_name}) pass the assumed condition instead, e.g. `_NOT_(n_zero)`.
+    - no buffer pointer is replaced by `(char *)0`; "no visible writes" is the
+    original pointer with guard `FALSE`.
 
 """
 
@@ -334,7 +613,7 @@ def gen_symbolic_summary(approx_mode: str, func_name:str, libc_code:str) -> str:
         }[True]
     gen_prompt = PromptTemplate(
         input_variables=["func_name", "libc_code"],
-        template=sum_prompt + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
+        template=sum_prompt + SUMMARY_OUTPUT_RULES + NEW_SYMBOLIC_API_RULES + """
         #Library function code:
         ```c
         {libc_code}
@@ -348,6 +627,7 @@ def gen_symbolic_summary(approx_mode: str, func_name:str, libc_code:str) -> str:
     return summary
 
 def gen_revision_summary(approx_mode: str, func_name:str, libc_code:str, summary:str, counterexamples:str) -> str:
+
     print("Revision generation running...")
     rev_prompt = {
             (approx_mode == "exact"): EXACT_REV_GEN_STRING,
@@ -356,7 +636,7 @@ def gen_revision_summary(approx_mode: str, func_name:str, libc_code:str, summary
         }[True]
     gen_prompt = PromptTemplate(
         input_variables=["func_name", "libc_code", "summary", "counterexamples"],
-        template=rev_prompt + GENERAL_REV_GEN_STRING + SUMMARY_OUTPUT_RULES + SYMBOLIC_API_RULES + """
+        template=rev_prompt + GENERAL_REV_GEN_STRING + SUMMARY_OUTPUT_RULES + NEW_SYMBOLIC_API_RULES + """
         #Library function code:
         ```c
         {libc_code}

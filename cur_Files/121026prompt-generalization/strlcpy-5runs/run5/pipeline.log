@@ -1,0 +1,351 @@
+Fetched uClibc-code for strlcpy: 
+
+
+#include "_string.h"
+
+#ifdef WANT_WIDE
+# define Wstrlcpy __wcslcpy
+# define Wstrxfrm wcsxfrm
+#else
+# define Wstrlcpy strlcpy
+# define Wstrxfrm strxfrm
+#endif
+
+
+
+size_t Wstrlcpy(register Wchar *__restrict dst,
+				  register const Wchar *__restrict src,
+				  size_t n)
+{
+	const Wchar *src0 = src;
+	Wchar dummy[1];
+
+	if (!n) {
+		dst = dummy;
+	} else {
+		--n;
+	}
+
+	while ((*dst = *src) != 0) {
+		if (n) {
+			--n;
+			++dst;
+		}
+		++src;
+	}
+
+	return src - src0;
+}
+#ifndef WANT_WIDE
+libc_hidden_def(strlcpy)
+#endif
+
+#ifndef __UCLIBC_HAS_LOCALE__
+strong_alias(Wstrlcpy,Wstrxfrm)
+#endif
+
+Generated concrete code:
+size_t concrete_strlcpy(register char *dst, register const char *src, size_t n)
+{
+  const char *src0 = src;
+  char dummy[1];
+  if (!n)
+  {
+    dst = dummy;
+  }
+  else
+  {
+    --n;
+  }
+  while ((*dst = *src) != 0)
+  {
+    if (n)
+    {
+      --n;
+      ++dst;
+    }
+    ++src;
+  }
+
+  return src - src0;
+}
+
+
+Summary generation running...
+Generated symbolic summary:
+static symbolic strlcpy_rec(char *dst, const char *src, size_t n, cnstr_t guard) {
+    symbolic c = (symbolic)(unsigned long)*(const unsigned char *)src;
+    cnstr_t end = _EQ_(c, 0);
+    
+    cond_write(dst, c, guard);
+    
+    if (is_certain(end)) {
+        return (symbolic)0;
+    }
+    
+    push_pc();
+    assume(_NOT_(end));
+    cnstr_t g = _AND_(guard, _NOT_(end));
+    
+    symbolic res;
+    cnstr_t n_zero = _EQ_(n, 0);
+    if (is_certain(n_zero)) {
+        res = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst, src + 1, n, g));
+    } else if (is_certain(_NOT_(n_zero))) {
+        res = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst + 1, src + 1, n - 1, g));
+    } else {
+        push_pc();
+        assume(n_zero);
+        symbolic a = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst, src + 1, n, _AND_(g, n_zero)));
+        pop_pc();
+        
+        push_pc();
+        assume(_NOT_(n_zero));
+        symbolic b = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst + 1, src + 1, n - 1, _AND_(g, _NOT_(n_zero))));
+        pop_pc();
+        
+        res = _ITE_VAR_(n_zero, a, b);
+    }
+    pop_pc();
+    
+    return _ITE_VAR_(end, (symbolic)0, res);
+}
+
+size_t strlcpy(char *dst, const char *src, size_t n) {
+    cnstr_t n_zero = _EQ_(n, 0);
+    if (is_certain(n_zero)) {
+        return (size_t)(unsigned long)strlcpy_rec((char *)0, src, n, FALSE);
+    }
+    
+    push_pc();
+    assume(_NOT_(n_zero));
+    symbolic res = strlcpy_rec(dst, src, n - 1, _NOT_(n_zero));
+    pop_pc();
+    
+    return (size_t)maximize(res);
+}
+
+Generating validation test...
+stdout: 
+
+stderr: 
+([36mInfo[0m) Compiling:
+ gcc -Wall -O0 -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-variable -fno-builtin -m32 /home/flo/_Uni/BAv1.1/cur_Files/121026prompt-generalization/strlcpy-5runs/run5/strlcpy_validation.c -o /home/flo/_Uni/BAv1.1/cur_Files/121026prompt-generalization/strlcpy-5runs/run5/strlcpy_validation.test /home/flo/_Uni/BAv1.1/lib.c
+
+Running validation test...
+Test results:
+{
+  "strlcpy_validation.test_1": {
+    "result": "bug",
+    "npaths": 1,
+    "counterexamples": {
+      "over-approximation": {
+        "dst": {
+          "dst_0": "\u00ff",
+          "dst_1": "\u00ff",
+          "dst_2": "\u00ff",
+          "dst_3": "\u00ff",
+          "dst_4": "Not in model"
+        },
+        "src": {
+          "src_0": 128,
+          "src_1": 128,
+          "src_2": 128,
+          "src_3": 0,
+          "src_4": "Not in model"
+        },
+        "n": 0,
+        "ret": 3,
+        "memory": {
+          "mem_dst": {
+            "mem_dst_0": 255,
+            "mem_dst_1": 255,
+            "mem_dst_2": 255,
+            "mem_dst_3": 255,
+            "mem_dst_4": 0
+          },
+          "mem_src": {
+            "mem_src_0": 128,
+            "mem_src_1": 128,
+            "mem_src_2": 128,
+            "mem_src_3": 0,
+            "mem_src_4": 0
+          }
+        }
+      },
+      "under-approximation": {
+        "dst": {
+          "dst_0": "\u00bf",
+          "dst_1": 0,
+          "dst_2": 0,
+          "dst_3": "\u00ff",
+          "dst_4": "Not in model"
+        },
+        "src": {
+          "src_0": "\u00bf",
+          "src_1": 0,
+          "src_2": 0,
+          "src_3": "\u00ff",
+          "src_4": "Not in model"
+        },
+        "n": 3,
+        "ret": 4,
+        "memory": {
+          "mem_dst": {
+            "mem_dst_0": 191,
+            "mem_dst_1": 0,
+            "mem_dst_2": 0,
+            "mem_dst_3": 255,
+            "mem_dst_4": 0
+          },
+          "mem_src": {
+            "mem_src_0": 191,
+            "mem_src_1": 0,
+            "mem_src_2": 0,
+            "mem_src_3": 255,
+            "mem_src_4": 0
+          }
+        }
+      }
+    }
+  }
+}
+result not accepted, regenerating symbolic summary...
+Revision generation running...
+Generated revised-symbolic summary:
+static symbolic strlcpy_rec(char *dst, const char *src, size_t n, cnstr_t guard) {
+    symbolic c = (symbolic)(unsigned long)*(const unsigned char *)src;
+    cnstr_t end = _EQ_(c, 0);
+
+    cond_write(dst, c, guard);
+
+    if (is_certain(end)) {
+        return (symbolic)0;
+    }
+
+    push_pc();
+    assume(_NOT_(end));
+    cnstr_t g = _AND_(guard, _NOT_(end));
+
+    symbolic res;
+    cnstr_t n_zero = _EQ_(n, 0);
+    if (is_certain(n_zero)) {
+        res = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst, src + 1, n, g));
+    } else if (is_certain(_NOT_(n_zero))) {
+        res = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst + 1, src + 1, n - 1, g));
+    } else {
+        push_pc();
+        assume(n_zero);
+        symbolic a = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst, src + 1, n, _AND_(g, n_zero)));
+        pop_pc();
+
+        push_pc();
+        assume(_NOT_(n_zero));
+        symbolic b = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst + 1, src + 1, n - 1, _AND_(g, _NOT_(n_zero))));
+        pop_pc();
+
+        res = _ITE_VAR_(n_zero, a, b);
+    }
+    pop_pc();
+
+    return _ITE_VAR_(end, (symbolic)0, res);
+}
+
+size_t strlcpy(char *dst, const char *src, size_t n) {
+    cnstr_t n_zero = _EQ_(n, 0);
+    if (is_certain(n_zero)) {
+        // Library: if (!n) dst = dummy; while (*dst = *src != 0) { ... src++; } return src - src0;
+        // We pass a pointer that doesn't affect the original dst buffer.
+        return (size_t)(unsigned long)strlcpy_rec((char *)0, src, n, TRUE);
+    }
+
+    push_pc();
+    assume(_NOT_(n_zero));
+    // Library: --n; while...
+    symbolic res = strlcpy_rec(dst, src, n - 1, _NOT_(n_zero));
+    pop_pc();
+
+    return (size_t)(unsigned long)res;
+}
+
+Generating validation test...
+stdout: 
+
+stderr: 
+([36mInfo[0m) Compiling:
+ gcc -Wall -O0 -Wno-implicit-function-declaration -Wno-int-conversion -Wno-unused-variable -fno-builtin -m32 /home/flo/_Uni/BAv1.1/cur_Files/121026prompt-generalization/strlcpy-5runs/run5/strlcpy_validation.c -o /home/flo/_Uni/BAv1.1/cur_Files/121026prompt-generalization/strlcpy-5runs/run5/strlcpy_validation.test /home/flo/_Uni/BAv1.1/lib.c
+
+Running validation test...
+Updated test results:
+{
+  "strlcpy_validation.test_1": {
+    "result": "exact",
+    "npaths": 1,
+    "counterexamples": {}
+  }
+}
+Final symbolic summary:
+static symbolic strlcpy_rec(char *dst, const char *src, size_t n, cnstr_t guard) {
+    symbolic c = (symbolic)(unsigned long)*(const unsigned char *)src;
+    cnstr_t end = _EQ_(c, 0);
+
+    cond_write(dst, c, guard);
+
+    if (is_certain(end)) {
+        return (symbolic)0;
+    }
+
+    push_pc();
+    assume(_NOT_(end));
+    cnstr_t g = _AND_(guard, _NOT_(end));
+
+    symbolic res;
+    cnstr_t n_zero = _EQ_(n, 0);
+    if (is_certain(n_zero)) {
+        res = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst, src + 1, n, g));
+    } else if (is_certain(_NOT_(n_zero))) {
+        res = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst + 1, src + 1, n - 1, g));
+    } else {
+        push_pc();
+        assume(n_zero);
+        symbolic a = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst, src + 1, n, _AND_(g, n_zero)));
+        pop_pc();
+
+        push_pc();
+        assume(_NOT_(n_zero));
+        symbolic b = (symbolic)((unsigned long)1 + (unsigned long)strlcpy_rec(dst + 1, src + 1, n - 1, _AND_(g, _NOT_(n_zero))));
+        pop_pc();
+
+        res = _ITE_VAR_(n_zero, a, b);
+    }
+    pop_pc();
+
+    return _ITE_VAR_(end, (symbolic)0, res);
+}
+
+size_t strlcpy(char *dst, const char *src, size_t n) {
+    cnstr_t n_zero = _EQ_(n, 0);
+    if (is_certain(n_zero)) {
+        // Library: if (!n) dst = dummy; while (*dst = *src != 0) { ... src++; } return src - src0;
+        // We pass a pointer that doesn't affect the original dst buffer.
+        return (size_t)(unsigned long)strlcpy_rec((char *)0, src, n, TRUE);
+    }
+
+    push_pc();
+    assume(_NOT_(n_zero));
+    // Library: --n; while...
+    symbolic res = strlcpy_rec(dst, src, n - 1, _NOT_(n_zero));
+    pop_pc();
+
+    return (size_t)(unsigned long)res;
+}
+
+Final test results:
+{
+  "strlcpy_validation.test_1": {
+    "result": "exact",
+    "npaths": 1,
+    "counterexamples": {}
+  }
+}
+Finished

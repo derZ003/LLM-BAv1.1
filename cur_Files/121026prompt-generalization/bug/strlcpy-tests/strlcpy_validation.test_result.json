@@ -1,0 +1,76 @@
+{
+  "strlcpy_validation.test_1": {
+    "result": "bug",
+    "npaths": 1,
+    "counterexamples": {
+      "over-approximation": {
+        "dst": {
+          "dst_0": "X",
+          "dst_1": 144,
+          "dst_2": "\u00e1",
+          "dst_3": "k",
+          "dst_4": "Not in model"
+        },
+        "src": {
+          "src_0": "q",
+          "src_1": 0,
+          "src_2": 0,
+          "src_3": "\u00bb",
+          "src_4": "Not in model"
+        },
+        "n": 2,
+        "ret": 1,
+        "memory": {
+          "mem_dst": {
+            "mem_dst_0": 113,
+            "mem_dst_1": 0,
+            "mem_dst_2": 225,
+            "mem_dst_3": 107,
+            "mem_dst_4": 0
+          },
+          "mem_src": {
+            "mem_src_0": 113,
+            "mem_src_1": 0,
+            "mem_src_2": 0,
+            "mem_src_3": 187,
+            "mem_src_4": 0
+          }
+        }
+      },
+      "under-approximation": {
+        "dst": {
+          "dst_0": 0,
+          "dst_1": 0,
+          "dst_2": 1,
+          "dst_3": "\u00c0",
+          "dst_4": "Not in model"
+        },
+        "src": {
+          "src_0": "\u00ba",
+          "src_1": 9,
+          "src_2": 0,
+          "src_3": "\u00c2",
+          "src_4": "Not in model"
+        },
+        "n": 3,
+        "ret": 2,
+        "memory": {
+          "mem_dst": {
+            "mem_dst_0": 0,
+            "mem_dst_1": 0,
+            "mem_dst_2": 0,
+            "mem_dst_3": 192,
+            "mem_dst_4": 0
+          },
+          "mem_src": {
+            "mem_src_0": 186,
+            "mem_src_1": 9,
+            "mem_src_2": 0,
+            "mem_src_3": 194,
+            "mem_src_4": 0
+          }
+        }
+      }
+    }
+  }
+}

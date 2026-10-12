@@ -1,4 +1,4 @@
-Problem:
+PROBLEMS:
 1. bzero has void return type (sets buffer to zero)
 -> modify SBV/create_test
 -> Alternative: use Wrapper
@@ -10,18 +10,18 @@ Problem:
 4. Problem with ensuring use of assume
 -> built skeleton that conatins right steps
 
-Ideas:
-1. ?automatically switch to underapprox. if exact failes
-2. ?automatically switch to gen_concrete when get_concrete fails
-3. !!! build cli-use
-4. ! for evaluation make stochastic analysis about cases (not compiling test, which iteration is passing the tests)
+IDEAS:
+1. ?    | automatically switch to underapprox. if exact failes
+2. ?    | automatically switch to gen_concrete when get_concrete fails
+3. !!!  | build cli-use
+4. MUST | for evaluation make stochastic analysis about cases (not compiling test, which iteration is passing the tests)
 
-Function List:
+FUNCTION LIST:
 
-Done: strncpy (zero-pads the rest), stpncpy, strlcpy (returns the source length)
-
+Done:
+    strncpy (zero-pads the rest), stpncpy, strlcpy (returns the source length)
+    memccpy (stops at a character, returns a pointer or NULL)
 TODO:
-memccpy (stops at a character, returns a pointer or NULL)
 strncasecmp
 
 memmove: overlapping regions, a good test of your summary's aliasing.
@@ -35,3 +35,20 @@ strsep: modifies a char **
 strtok_r (avoid strtok, which has static state)
 
 for future: strverscmp, strxfrm, _collate, strerror/strsignal (they use tables)
+
+FUNCTION CLASSES:
+                                 | prompting                           | testing
+1. scan / length                 | strlen, strnlen                     | ffs, ffsll
+2. search with failure value     | memchr, strrchr, strchrnul          | strpbrk
+3. copy, returns dest            | strcpy, memcpy, strncpy             | memmove, bcopy, strcat, strncat
+4. copy, returns computed value  | stpcpy, stpncpy, memccpy, strlcpy   | strlcat
+5. compare                       | strcmp, strncmp, memcmp             | strverscmp
+6. character transform           | tolower, strcasecmp                 | toupper, isalpha, isdigit
+7. fill / void                   | memset, bzero                       | explicit_bzero
+8. allocation                    | strdup                              | strndup
+
+trippingstones:
+    strspn, strcspn
+    strstr, memmem, strcasestr
+    strsep, strtok_r
+    atoi, strtol

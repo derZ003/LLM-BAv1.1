@@ -22,7 +22,7 @@ RULE_ERROR_MSG = "The summary violates an API rule (checked before testing):\n"
 SUMMARY_RULES = [
     (re.compile(r"[(,]\s*\(\s*(?:const\s+)?(?:(?:un)?signed\s+)?char\s*\*\s*\)\s*(?:0|NULL)\s*[,)]"),
      "A buffer pointer is replaced by a null pointer (`(char *)0` passed as an argument). "
-     "For \"no visible writes\" pass the original pointer with guard `FALSE`."),
+    "For \"no visible writes\" pass the original pointer with guard `FALSE`."),
 ]
 RUNTIME_ERROR_HINTS = {
     "UnsatConstraintError": "An `assume(c)` was called with a condition `c` that is impossible on the current path. "
@@ -30,7 +30,7 @@ RUNTIME_ERROR_HINTS = {
     "MemoryPermissionsError": "The summary accessed memory outside the input buffers (e.g. read past a possibly reached end).",
     "DuplicateSymbolicVariableError": "`sym_var_named` was called twice with the same name; names must be unique.",
     "IndexError": "A constraint argument (e.g. `cond` of `_ITE_VAR_`/`_ITE_`, or an argument of `_AND_`/`_NOT_`/`assume`) "
-                  "is a symbolic value or pointer instead of a `cnstr_t`. Build the condition with `_EQ_`/`_NEQ_`/... first.",
+                "is a symbolic value or pointer instead of a `cnstr_t`. Build the condition with `_EQ_`/`_NEQ_`/... first.",
 }
 #accepted result types per approximation mode, exact also accepted for over- and under-approximation
 ACCEPTED_RESULTS = {

@@ -15,6 +15,7 @@ IDEAS:
 2. ?    | automatically switch to gen_concrete when get_concrete fails
 3. !!!  | build cli-use
 4. MUST | for evaluation make stochastic analysis about cases (not compiling test, which iteration is passing the tests)
+5. ?    | Rekursion Parameter mit neuem prompting
 
 FUNCTION LIST:
 
@@ -46,8 +47,9 @@ FUNCTION CLASSES:
 6. character transform           | tolower, strcasecmp                 | toupper, isalpha, isdigit
 7. fill / void                   | memset, bzero                       | explicit_bzero
 8. allocation                    | strdup                              | strndup
+9. input
 
-trippingstones:
+trippingstones/others:
     strspn, strcspn
     strstr, memmem, strcasestr
     strsep, strtok_r

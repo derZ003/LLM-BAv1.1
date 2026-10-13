@@ -550,7 +550,7 @@ EXACT_SUM_GEN_STRING = """#Task: You are a senior software engineer and need to 
     Your answer must not include any other text or explanation, only the C code block.
 """
 #Prompt for generating over-approximate symbolic summaries
-OVER_SUM_GEN_STRING="""#Task: You are a senior software engineer and need to write an over-approximate summary of the follwoing C library function {func_name}
+OVER_SUM_GEN_STRING = """#Task: You are a senior software engineer and need to write an over-approximate summary of the follwoing C library function {func_name}
     for symbolic testing, the summary must conform to the API guidelines.
     Your answer must not include any other text or explanation, only the C code block.
 """
